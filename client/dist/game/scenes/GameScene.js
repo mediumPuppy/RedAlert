@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH } from '../constants';
 export class GameScene extends Scene {
     constructor() {
         super({ key: 'GameScene' });
@@ -10,13 +10,18 @@ export class GameScene extends Scene {
         this.resources = 1000;
     }
     create() {
-        // Create 20x20 grid map
+        this.createMap();
+        this.createInitialUnits();
+        this.createUI();
+        this.setupInput();
+    }
+    createMap() {
         for (let x = 0; x < GRID_SIZE; x++) {
             this.map[x] = [];
             for (let y = 0; y < GRID_SIZE; y++) {
                 const tileType = Math.random() < 0.1 ? 'WATER' :
                     Math.random() < 0.15 ? 'ORE' : 'GRASS';
-                const tile = this.add.rectangle(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, COLORS[tileType]);
+                const tile = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, COLORS[tileType]);
                 tile.setStrokeStyle(1, 0x000000);
                 tile.setData('type', tileType);
                 tile.setData('x', x);
@@ -25,41 +30,42 @@ export class GameScene extends Scene {
                 this.map[x][y] = tile;
             }
         }
-        // Add initial units
+        this.updateMapPositions(); // Position tiles initially
+    }
+    createInitialUnits() {
         this.units.push(this.createUnit('TANK', 2, 2));
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
-        // Resource display
-        this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
+    }
+    createUI() {
+        this.resourceText = this.add.text(0, 0, `Resources: ${this.resources}`, {
             fontSize: '16px',
             color: '#ffffff'
-        }).setDepth(1); // Ensure visibility
-        // Handle unit selection
+        }).setDepth(1);
+        this.updateUIPositions(); // Position UI initially
+    }
+    setupInput() {
         this.input.on('gameobjectdown', (pointer, gameObject) => {
             const unit = gameObject;
             if (unit.getData('type') === 'UNIT') {
-                if (this.selectedUnit) {
+                if (this.selectedUnit)
                     this.selectedUnit.setStrokeStyle(1, 0x000000);
-                }
                 this.selectedUnit = unit;
                 unit.setStrokeStyle(2, 0xffff00);
             }
-            // Combat logic - attack if clicking enemy unit
             if (this.selectedUnit && unit !== this.selectedUnit && unit.getData('type') === 'UNIT') {
                 this.attack(this.selectedUnit, unit);
             }
         });
-        // Handle movement and harvesting
         this.input.on('pointerdown', (pointer) => {
             if (!this.selectedUnit)
                 return;
-            const x = Math.floor(pointer.x / TILE_SIZE);
-            const y = Math.floor(pointer.y / TILE_SIZE);
+            const scaleFactor = this.getScaleFactor();
+            const x = Math.floor((pointer.x / scaleFactor) / TILE_SIZE);
+            const y = Math.floor((pointer.y / scaleFactor) / TILE_SIZE);
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
-                // Handle harvesting
-                if (this.selectedUnit.getData('unitType') === 'HARVESTER' &&
-                    tile.getData('type') === 'ORE') {
+                if (this.selectedUnit.getData('unitType') === 'HARVESTER' && tile.getData('type') === 'ORE') {
                     this.harvest(this.selectedUnit, tile);
                 }
                 else {
@@ -69,12 +75,14 @@ export class GameScene extends Scene {
         });
     }
     update() {
-        // Update game state if needed
         this.units = this.units.filter(unit => unit.getData('health') > 0);
+    }
+    getScaleFactor() {
+        return this.scale.width / GAME_WIDTH;
     }
     createUnit(type, gridX, gridY) {
         const size = type === 'INFANTRY' ? TILE_SIZE / 2 : TILE_SIZE;
-        const unit = this.add.rectangle(gridX * TILE_SIZE + TILE_SIZE / 2, gridY * TILE_SIZE + TILE_SIZE / 2, size, size, COLORS[type]);
+        const unit = this.add.rectangle(0, 0, size, size, COLORS[type]);
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
@@ -84,7 +92,38 @@ export class GameScene extends Scene {
         unit.setData('gridX', gridX);
         unit.setData('gridY', gridY);
         unit.setInteractive();
+        this.updateUnitPosition(unit); // Position unit initially
         return unit;
+    }
+    updateMapPositions() {
+        const scaleFactor = this.getScaleFactor();
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                const tile = this.map[x][y];
+                tile.setPosition((x * TILE_SIZE + TILE_SIZE / 2) * scaleFactor, (y * TILE_SIZE + TILE_SIZE / 2) * scaleFactor);
+                tile.setScale(scaleFactor);
+            }
+        }
+    }
+    updateUnitPositions() {
+        this.units.forEach(unit => this.updateUnitPosition(unit));
+    }
+    updateUnitPosition(unit) {
+        const scaleFactor = this.getScaleFactor();
+        const gridX = unit.getData('gridX');
+        const gridY = unit.getData('gridY');
+        unit.setPosition((gridX * TILE_SIZE + TILE_SIZE / 2) * scaleFactor, (gridY * TILE_SIZE + TILE_SIZE / 2) * scaleFactor);
+        unit.setScale(scaleFactor);
+    }
+    updateUIPositions() {
+        const scaleFactor = this.getScaleFactor();
+        this.resourceText.setPosition(10 * scaleFactor, 10 * scaleFactor);
+        this.resourceText.setScale(scaleFactor);
+    }
+    handleResize() {
+        this.updateMapPositions();
+        this.updateUnitPositions();
+        this.updateUIPositions();
     }
     isValidMove(x, y) {
         if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE)

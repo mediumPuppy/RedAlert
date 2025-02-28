@@ -217,13 +217,17 @@ class GameScene extends Phaser.Scene {
         // Mark new position as occupied
         this.map[x][y].setData('occupied', true);
     }
+    handleResize() {
+        // Implement the logic to handle resizing the game scene
+        console.log('GameScene handleResize called');
+    }
 }
 const config = {
     type: Phaser.AUTO,
     width: GAME_WIDTH, // 640px
     height: GAME_HEIGHT, // 640px
     scale: {
-        mode: Phaser.Scale.FIT, // Scale while maintaining aspect ratio
+        mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
         parent: 'game-container',
         expandParent: true
@@ -242,4 +246,8 @@ const game = new Phaser.Game(config);
 // Handle window resize
 window.addEventListener('resize', () => {
     game.scale.resize(window.innerWidth, window.innerHeight);
+    const gameScene = game.scene.getScene('GameScene');
+    if (gameScene && gameScene.scene.isActive()) {
+        gameScene.handleResize();
+    }
 });
