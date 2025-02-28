@@ -114,6 +114,8 @@ class GameScene extends Phaser.Scene {
     private pendingGameStart: any = null;
     private initialized: boolean = false;
     private mode: string | null = null;
+    private lastStateUpdate: number = 0; // Track last state update time
+    private readonly STATE_UPDATE_DEBOUNCE = 250; // Debounce state updates (ms)
 
     constructor() {
         super('GameScene');
@@ -203,7 +205,11 @@ class GameScene extends Phaser.Scene {
             console.log('Received gameState event', data);
             if (this.initialized) {
                 this.gameId = data.gameId;
-                this.handleGameState(data);
+                const now = Date.now();
+                if (now - this.lastStateUpdate >= this.STATE_UPDATE_DEBOUNCE) { // Debounce to avoid spamming
+                    this.handleGameState(data);
+                    this.lastStateUpdate = now;
+                }
                 gameIdText.setText(`Game ID: ${data.gameId}`);
                 if (!this.inLobby) waitingText.destroy();
             } else {
@@ -233,7 +239,6 @@ class GameScene extends Phaser.Scene {
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && this.gameId && !this.inLobby) {
                 console.log(`Tab refocused, requesting game state for ${this.gameId}`);
-                this.tweens.killAll(); // Clear all pending tweens
                 socket.emit('requestGameState', this.gameId);
             }
         });
@@ -457,6 +462,9 @@ class GameScene extends Phaser.Scene {
             const targetX = data.x * TILE_SIZE + TILE_SIZE/2;
             const targetY = data.y * TILE_SIZE + TILE_SIZE/2;
             
+            // Prevent overlap with state sync
+            this.tweens.killTweensOf(unit);
+            
             // Handle turning and movement based on unit type
             if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
                 // Turn first, then move
@@ -494,18 +502,16 @@ class GameScene extends Phaser.Scene {
                 });
             } else {
                 // Infantry or no turning needed
-                unit.setAngle(data.facing);
-                unit.setData('facing', data.facing);
-                unit.setFillStyle(originalColor);
-                unit.setVisible(true);
-                
                 this.tweens.add({
                     targets: unit,
                     x: targetX,
                     y: targetY,
+                    angle: data.facing,
                     duration: data.duration,
                     ease: 'Linear',
                     onStart: () => {
+                        unit.setAngle(data.facing);
+                        unit.setData('facing', data.facing);
                         unit.setFillStyle(originalColor);
                         unit.setVisible(true);
                     },
@@ -1258,27 +1264,27 @@ class GameScene extends Phaser.Scene {
     }) {
         this.gameId = data.gameId;
         
-        // Kill all tweens to prevent animation queue from playing out
-        this.tweens.killAll();
-        
         if (this.inLobby) {
             this.showLobbyUI(data.players);
-        } else {
-            // Safety check - ensure map and units are initialized
-            if (!this.map || this.map.length === 0) {
-                console.log('Map not initialized yet, creating map first');
-                this.createMap();
-            }
+            return;
+        }
+
+        // Safety check - ensure map and units are initialized
+        if (!this.map || this.map.length === 0) {
+            console.log('Map not initialized yet, creating map first');
+            this.createMap();
+        }
+        
+        // Update existing units or create new ones with smooth transition
+        const updatedUnits = new Set<string>();
+        
+        Object.entries(data.units).forEach(([id, unitData]) => {
+            let unit = this.units.find(u => u.getData('id') === id);
             
-            // Clear existing units
-            if (this.units && this.units.length > 0) {
-                this.units.forEach(unit => unit.destroy());
-                this.units = [];
-            }
-            
-            // Create units from server data without animations
-            Object.entries(data.units).forEach(([id, unitData]) => {
-                const unit = this.add.rectangle(
+            if (!unit) {
+                // Create new unit if it doesn't exist
+                console.log(`Creating new unit ${unitData.type} with ID ${id}`);
+                unit = this.add.rectangle(
                     unitData.x * TILE_SIZE + TILE_SIZE/2,
                     unitData.y * TILE_SIZE + TILE_SIZE/2,
                     unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
@@ -1317,16 +1323,88 @@ class GameScene extends Phaser.Scene {
                 
                 // Mark the tile as occupied
                 if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                    unitData.y >= 0 && unitData.y < MAP_SIZE &&
-                    this.map && this.map[unitData.x] && this.map[unitData.x][unitData.y]) {
+                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
                     this.map[unitData.x][unitData.y].setData('occupied', true);
                 }
-            });
-            
-            // Only update minimap if it's initialized
-            if (this.minimapContext && this.minimapCanvas) {
-                this.updateMinimap();
+            } else {
+                // Update existing unit with smooth animation
+                const currentX = unit.getData('gridX');
+                const currentY = unit.getData('gridY');
+                
+                // Skip if unit hasn't moved
+                if (currentX === unitData.x && currentY === unitData.y && 
+                    unit.getData('facing') === unitData.facing) {
+                    updatedUnits.add(id);
+                    return;
+                }
+                
+                // Clear old position
+                if (currentX >= 0 && currentX < MAP_SIZE && 
+                    currentY >= 0 && currentY < MAP_SIZE) {
+                    this.map[currentX][currentY].setData('occupied', false);
+                }
+                
+                // Calculate target position
+                const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
+                const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
+                const originalColor = unit.getData('originalColor') || COLORS[unitData.type as UnitType];
+                
+                // Stop any existing tweens for this unit
+                this.tweens.killTweensOf(unit);
+                
+                // Animate to new position with a short, fixed duration
+                this.tweens.add({
+                    targets: unit,
+                    x: targetX,
+                    y: targetY,
+                    angle: unitData.facing,
+                    duration: 500, // Short catch-up animation (500ms)
+                    ease: 'Linear',
+                    onStart: () => {
+                        if (unit) {  // Add null check for TypeScript
+                            unit.setFillStyle(originalColor);
+                            unit.setVisible(true);
+                        }
+                    },
+                    onComplete: () => {
+                        if (unit) {  // Add null check for TypeScript
+                            unit.setData('gridX', unitData.x);
+                            unit.setData('gridY', unitData.y);
+                            unit.setData('facing', unitData.facing);
+                            unit.setFillStyle(originalColor);
+                            unit.setVisible(true);
+                            
+                            if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                                unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                                this.map[unitData.x][unitData.y].setData('occupied', true);
+                            }
+                        }
+                    }
+                });
             }
+            
+            updatedUnits.add(id);
+        });
+        
+        // Remove units that no longer exist in the server state
+        this.units = this.units.filter(unit => {
+            const id = unit.getData('id');
+            if (!updatedUnits.has(id)) {
+                console.log(`Removing unit ${id} as it no longer exists in server state`);
+                const x = unit.getData('gridX');
+                const y = unit.getData('gridY');
+                if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
+                    this.map[x][y].setData('occupied', false);
+                }
+                unit.destroy();
+                return false;
+            }
+            return true;
+        });
+        
+        // Update minimap
+        if (this.minimapContext && this.minimapCanvas) {
+            this.updateMinimap();
         }
     }
 }
