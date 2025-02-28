@@ -173,15 +173,6 @@ class GameScene extends Phaser.Scene {
                 
                 if (this.isValidMove(x, y)) {
                     this.moveUnit(this.selectedUnit, x, y);
-                    // Emit socket event for multiplayer
-                    socket.emit('moveUnit', { 
-                        id: this.selectedUnit.getData('id'), 
-                        x: x, 
-                        y: y,
-                        facing: this.selectedUnit.getData('facing'),
-                        duration: 0, // Will be calculated in moveUnit
-                        turnDuration: 0 // Will be calculated in moveUnit
-                    });
                 }
             }
         });
@@ -217,6 +208,12 @@ class GameScene extends Phaser.Scene {
                 const currentX = unit.getData('gridX');
                 const currentY = unit.getData('gridY');
                 
+                // Skip processing if duration is zero or negative - prevents instant teleportation
+                if (data.duration <= 0) {
+                    console.log(`Skipping instant movement for unit ${data.id} (duration: ${data.duration})`);
+                    return;
+                }
+                
                 // Get the original color from data or use current fillColor as fallback
                 const originalColor = unit.getData('originalColor') || unit.fillColor;
                 console.log(`unitMoved: Unit ${data.id} (${unitType}) original color: ${originalColor.toString(16)}`);
@@ -242,7 +239,7 @@ class GameScene extends Phaser.Scene {
                     this.tweens.add({
                         targets: unit,
                         angle: data.facing,
-                        duration: data.turnDuration || 250, // Use default if missing
+                        duration: data.turnDuration,
                         ease: 'Linear',
                         onComplete: () => {
                             unit.setData('facing', data.facing);
@@ -254,7 +251,7 @@ class GameScene extends Phaser.Scene {
                                 targets: unit,
                                 x: targetX,
                                 y: targetY,
-                                duration: data.duration || 500, // Use default if missing
+                                duration: data.duration,
                                 ease: 'Linear',
                                 onStart: () => {
                                     // Make sure color is correct at tween start
@@ -288,7 +285,7 @@ class GameScene extends Phaser.Scene {
                         targets: unit,
                         x: targetX,
                         y: targetY,
-                        duration: data.duration || 500, // Use default if missing
+                        duration: data.duration,
                         ease: 'Linear',
                         onStart: () => {
                             // Make sure color is correct at tween start
@@ -491,7 +488,7 @@ class GameScene extends Phaser.Scene {
         
         // Get the original color
         const originalColor = unit.getData('originalColor') || unit.fillColor;
-        console.log(`performMove: Unit ${unit.getData('id')} original color: ${originalColor.toString(16)} moving to (${x},${y})`);
+        console.log(`performMove: Unit ${unit.getData('id')} original color: ${originalColor.toString(16)}`);
         
         // Ensure unit has the right color before starting movement
         unit.setFillStyle(originalColor);
