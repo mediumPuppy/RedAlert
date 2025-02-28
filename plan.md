@@ -31,8 +31,8 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
 
 **Tasks**:
 - **Local Setup**:
-  - Install Node.js and npm: Download from [nodejs.org](https://nodejs.org) or use a package manager (e.g., `sudo apt install nodejs npm` on Ubuntu).
-  - Install a code editor (e.g., VS Code).
+  - ~~Install Node.js and npm: Download from [nodejs.org](https://nodejs.org) or use a package manager (e.g., `sudo apt install nodejs npm` on Ubuntu).~~
+  - ~~Install a code editor (e.g., VS Code).~~
   - Initialize a project:
     ```bash
     npm init -y
@@ -40,8 +40,8 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
     ```
   - Create a project folder with subdirectories: `client` (for Phaser frontend) and `server` (for Node.js backend).
 - **AWS CLI Setup**:
-  - Install AWS CLI: `pip install awscli` (requires Python).
-  - Configure credentials: `aws configure` (use your AWS free-tier access key, secret key, region, e.g., `us-east-1`).
+  - ~~Install AWS CLI: `pip install awscli` (requires Python).~~
+  - ~~Configure credentials: `aws configure` (use your AWS free-tier access key, secret key, region, e.g., `us-east-1`).~~
   - Launch an EC2 instance:
     ```bash
     aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name MyKeyPair --security-groups my-sg
@@ -57,7 +57,7 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
 
 **Output**: A fully configured local development environment and a running EC2 instance ready for deployment.
 
----
+---home@linux-new-big redalert % aws ect run-instances --image-id ami-010af6e897f3ad567 --count 1 --instance-type t2.micro --key-name 
 
 ### **Step 3: Build Core Gameplay**
 
