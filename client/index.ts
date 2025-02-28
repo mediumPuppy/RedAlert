@@ -32,93 +32,59 @@ class MainMenu extends Phaser.Scene {
 
     create() {
         console.log('MainMenu create started');
-        
-        // Add background color to make sure we can see the scene
         this.cameras.main.setBackgroundColor('#222222');
-
-        // Center text
         const centerX = this.cameras.main.width / 2;
         const centerY = this.cameras.main.height / 2;
 
-        // Title with debug background
         this.add.text(centerX, centerY - 100, 'Red Alert 25', {
-            fontSize: '48px',
-            color: '#ffffff',
-            fontFamily: '"Press Start 2P", cursive',
-            backgroundColor: '#ff0000',
-            padding: { x: 20, y: 10 }
+            fontSize: '48px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
+            backgroundColor: '#ff0000', padding: { x: 20, y: 10 }
         }).setOrigin(0.5);
 
-        // Play button with visible styling
         const playButton = this.add.text(centerX, centerY, 'Play Multiplayer', {
-            fontSize: '32px',
-            color: '#ffffff',
-            backgroundColor: '#006400',
-            padding: { x: 20, y: 10 },
-            fontFamily: '"Press Start 2P", cursive'
-        })
-        .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true });
+            fontSize: '32px', color: '#ffffff', backgroundColor: '#006400',
+            padding: { x: 20, y: 10 }, fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-        // Make button interactive
         playButton.on('pointerover', () => playButton.setStyle({ backgroundColor: '#008000' }));
         playButton.on('pointerout', () => playButton.setStyle({ backgroundColor: '#006400' }));
         playButton.on('pointerdown', () => {
             console.log('Joining matchmaking');
             socket.emit('joinMatchmaking');
             playButton.setVisible(false);
-            
-            // Show finding game text
             this.findingGameText = this.add.text(centerX, centerY, 'Finding Players...', {
-                fontSize: '24px',
-                color: '#ffffff',
-                backgroundColor: '#000066',
-                padding: { x: 20, y: 10 },
-                fontFamily: '"Press Start 2P", cursive'
+                fontSize: '24px', color: '#ffffff', backgroundColor: '#000066',
+                padding: { x: 20, y: 10 }, fontFamily: '"Press Start 2P", cursive'
             }).setOrigin(0.5);
         });
 
-        // Sound button
         const soundButton = this.add.text(centerX, centerY + 100, 'Sound: On', {
-            fontSize: '32px',
-            color: '#ffffff',
-            backgroundColor: '#000066',
-            padding: { x: 20, y: 10 },
-            fontFamily: '"Press Start 2P", cursive'
-        })
-        .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true });
+            fontSize: '32px', color: '#ffffff', backgroundColor: '#000066',
+            padding: { x: 20, y: 10 }, fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-        // Debug text to confirm position
-        this.add.text(10, 10, 'Debug: MainMenu Active', {
-            fontSize: '16px',
-            color: '#ffffff'
-        });
+        this.add.text(10, 10, 'Debug: MainMenu Active', { fontSize: '16px', color: '#ffffff' });
 
-        // Handle sound
         this.soundOn = true;
         this.bgm = this.sound.add('bgm', { loop: true });
-        
         soundButton.on('pointerdown', () => {
             this.soundOn = !this.soundOn;
             soundButton.setText(`Sound: ${this.soundOn ? 'On' : 'Off'}`);
             if (this.bgm) {
-                if (this.soundOn) {
-                    this.bgm.play();
-                } else {
-                    this.bgm.stop();
-                }
+                if (this.soundOn) this.bgm.play();
+                else this.bgm.stop();
             }
         });
 
-        // Listen for matchmaking events
-        socket.on('matchmakingStarted', () => {
-            console.log('Matchmaking started');
+        socket.on('matchmakingStarted', () => console.log('Matchmaking started'));
+        socket.on('matchmakingUpdate', ({ message }: { message: string }) => {
+            console.log(`Matchmaking update: ${message}`);
+            if (this.findingGameText) this.findingGameText.setText(`Finding Game...\n${message}`);
         });
 
         socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
             console.log(`Game created: ${gameId} with ${players.length} players`);
-            this.scene.start('GameScene', { gameId });
+            this.scene.start('GameScene', { gameId, players });
         });
     }
 }
@@ -140,14 +106,19 @@ class GameScene extends Phaser.Scene {
     private currentMode: 'normal' | 'build' | 'attack' | 'harvest' = 'normal';
     private gameId: string | null = null;
     private inLobby: boolean = true;
+    private pendingGameCreated: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] } | null = null;
+    private pendingLobbyUpdate: any = null;
+    private pendingGameStart: any = null;
+    private initialized: boolean = false;
 
     constructor() {
         super('GameScene');
     }
 
-    init(data: { gameId?: string }) {
-        if (data.gameId) {
-            this.gameId = data.gameId;
+    init(data: { gameId?: string, players?: { id: string, team: string | null, ready: boolean }[] }) {
+        if (data) {
+            this.gameId = data.gameId || null;
+            if (data.players) this.pendingGameCreated = { gameId: data.gameId!, players: data.players };
         }
     }
 
@@ -161,59 +132,40 @@ class GameScene extends Phaser.Scene {
     create() {
         console.log('GameScene create started');
         this.inLobby = true;
+        this.initialized = true;
 
-        // Add background color to make sure we can see the scene
         this.cameras.main.setBackgroundColor('#222222');
-
         const centerX = this.cameras.main.width / 2;
         const centerY = this.cameras.main.height / 2;
 
-        // Show waiting message if we're in a game
-        if (this.gameId) {
-            this.add.text(centerX, centerY - 50, 'Waiting for Players...', {
-                fontSize: '24px',
-                color: '#ffffff',
-                fontFamily: '"Press Start 2P", cursive',
-                backgroundColor: '#000066',
-                padding: { x: 20, y: 10 }
-            }).setOrigin(0.5);
+        const waitingText = this.add.text(centerX, centerY - 50, 'Waiting for Players...', {
+            fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
+            backgroundColor: '#000066', padding: { x: 20, y: 10 }
+        }).setOrigin(0.5);
 
-            this.add.text(centerX, centerY, `Game ID: ${this.gameId}`, {
-                fontSize: '16px',
-                color: '#ffffff',
-                fontFamily: '"Press Start 2P", cursive'
-            }).setOrigin(0.5);
-        } else {
-            // If no gameId, show error and return to main menu
-            this.add.text(centerX, centerY, 'Error: No game found', {
-                fontSize: '24px',
-                color: '#ffffff',
-                fontFamily: '"Press Start 2P", cursive',
-                backgroundColor: '#ff0000',
-                padding: { x: 20, y: 10 }
-            }).setOrigin(0.5);
+        const gameIdText = this.add.text(centerX, centerY, this.gameId ? `Game ID: ${this.gameId}` : 'Connecting...', {
+            fontSize: '16px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5);
 
-            // Add button to return to main menu
-            const returnButton = this.add.text(centerX, centerY + 100, 'Return to Menu', {
-                fontSize: '20px',
-                color: '#ffffff',
-                backgroundColor: '#006400',
-                padding: { x: 20, y: 10 },
-                fontFamily: '"Press Start 2P", cursive'
-            })
-            .setOrigin(0.5)
-            .setInteractive({ useHandCursor: true });
+        socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
+            console.log(`Received gameCreated for ${gameId} with ${players.length} players`);
+            this.gameId = gameId;
+            if (this.initialized) {
+                this.showLobbyUI(players);
+                gameIdText.setText(`Game ID: ${gameId}`);
+                waitingText.destroy();
+            } else {
+                this.pendingGameCreated = { gameId, players };
+            }
+        });
 
-            returnButton.on('pointerdown', () => {
-                this.scene.start('MainMenu');
-            });
-
-            return;
-        }
-
-        // Set up socket event listeners for the lobby and game
-        socket.on('lobbyUpdate', ({ players }: { players: { id: string, team: string | null, ready: boolean }[] }) => {
-            this.showLobbyUI(players);
+        socket.on('lobbyUpdate', (data: { players: { id: string, team: string | null, ready: boolean }[] }) => {
+            console.log('Received lobbyUpdate event', data);
+            if (this.initialized && this.inLobby) {
+                this.showLobbyUI(data.players);
+            } else {
+                this.pendingLobbyUpdate = data;
+            }
         });
 
         socket.on('gameStart', (data: { 
@@ -221,41 +173,73 @@ class GameScene extends Phaser.Scene {
             players: { id: string, team: string | null, ready: boolean }[], 
             units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
         }) => {
-            this.inLobby = false;
-            this.startGame(data);
+            console.log('Received gameStart event', data);
+            if (this.initialized) {
+                this.inLobby = false;
+                this.startGame(data);
+            } else {
+                this.pendingGameStart = data;
+            }
         });
 
-        // Handle unit movement from other players
         socket.on('unitMoved', (data: UnitMovedData) => {
-            if (!this.inLobby) {
+            if (!this.inLobby && this.initialized) {
+                console.log(`Unit moved: ${data.id} to (${data.x}, ${data.y})`);
                 this.handleRemoteUnitMovement(data);
             }
         });
-        
-        // Handle game state updates (for reconnections and initial state)
+
         socket.on('gameState', (data: { 
             gameId: string, 
             players: { id: string, team: string | null, ready: boolean }[], 
             units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
         }) => {
-            this.handleGameState(data);
+            console.log('Received gameState event', data);
+            if (this.initialized) {
+                this.gameId = data.gameId;
+                this.handleGameState(data);
+                gameIdText.setText(`Game ID: ${data.gameId}`);
+                if (!this.inLobby) waitingText.destroy();
+            } else {
+                this.pendingGameStart = data; // Use gameStart for consistency if not initialized
+            }
         });
-        
-        // Handle disconnection from server
+
         socket.on('disconnect', () => {
+            console.log('Disconnected from server');
             if (this.inLobby) {
                 this.scene.start('MainMenu');
             } else {
                 this.add.text(centerX, centerY, 'Disconnected from Server', {
-                    fontSize: '24px',
-                    color: '#ffffff',
-                    fontFamily: '"Press Start 2P", cursive',
-                    backgroundColor: '#ff0000',
-                    padding: { x: 20, y: 10 }
+                    fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
+                    backgroundColor: '#ff0000', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5);
                 this.time.delayedCall(2000, () => this.scene.start('MainMenu'));
             }
         });
+
+        // Process pending events
+        if (this.pendingGameCreated) {
+            console.log('Processing pending gameCreated', this.pendingGameCreated);
+            this.gameId = this.pendingGameCreated.gameId;
+            this.showLobbyUI(this.pendingGameCreated.players);
+            gameIdText.setText(`Game ID: ${this.gameId}`);
+            waitingText.destroy();
+            this.pendingGameCreated = null;
+        }
+
+        if (this.pendingLobbyUpdate) {
+            console.log('Processing pending lobbyUpdate', this.pendingLobbyUpdate);
+            this.showLobbyUI(this.pendingLobbyUpdate.players);
+            this.pendingLobbyUpdate = null;
+        }
+
+        if (this.pendingGameStart) {
+            console.log('Processing pending gameStart', this.pendingGameStart);
+            this.inLobby = false;
+            this.startGame(this.pendingGameStart);
+            this.pendingGameStart = null;
+        }
     }
 
     private showLobbyUI(players: { id: string, team: string | null, ready: boolean }[]) {
@@ -264,8 +248,9 @@ class GameScene extends Phaser.Scene {
         // Clear existing UI
         this.children.removeAll();
 
-        const centerX = this.cameras.main.width / 2;
-        const centerY = this.cameras.main.height / 2;
+        // Safety check for cameras.main - if it's not initialized yet, use default values
+        const centerX = this.cameras.main ? this.cameras.main.width / 2 : GAME_WIDTH / 2;
+        const centerY = this.cameras.main ? this.cameras.main.height / 2 : GAME_HEIGHT / 2;
 
         // Add game title
         this.add.text(centerX, 50, 'Red Alert 25 - Game Lobby', {
@@ -753,10 +738,15 @@ class GameScene extends Phaser.Scene {
 
     update() {
         // Filter out destroyed or dead units
-        this.units = this.units.filter(unit => {
-            const health = unit.getData('health');
-            return unit.active && health !== undefined && health > 0;
-        });
+        if (this.units) {
+            this.units = this.units.filter(unit => {
+                const health = unit.getData('health');
+                return unit.active && health !== undefined && health > 0;
+            });
+        }
+        
+        // Safety check for camera
+        if (!this.cameras || !this.cameras.main) return;
         
         // Scroll based on mouse position (inspired by SCROLL.CPP)
         const pointer = this.input.activePointer;
@@ -840,6 +830,9 @@ class GameScene extends Phaser.Scene {
     private updateMinimap() {
         if (!this.minimapContext || !this.minimapCanvas) return;
         
+        // Safety check - ensure map is initialized
+        if (!this.map || this.map.length === 0) return;
+        
         const ctx = this.minimapContext;
         const scale = 1.5; // Scale for minimap
         
@@ -853,42 +846,48 @@ class GameScene extends Phaser.Scene {
         // Draw tiles
         for (let x = 0; x < MAP_SIZE; x++) {
             for (let y = 0; y < MAP_SIZE; y++) {
-                const tile = this.map[x][y];
-                const tileType = tile.getData('type') as TileType;
-                ctx.fillStyle = '#' + COLORS[tileType].toString(16).padStart(6, '0');
-                ctx.globalAlpha = 0.7;
-                ctx.fillRect(x * scale, y * scale, scale, scale);
+                if (this.map[x] && this.map[x][y]) {
+                    const tile = this.map[x][y];
+                    const tileType = tile.getData('type') as TileType;
+                    ctx.fillStyle = '#' + COLORS[tileType].toString(16).padStart(6, '0');
+                    ctx.globalAlpha = 0.7;
+                    ctx.fillRect(x * scale, y * scale, scale, scale);
+                }
             }
         }
         
         // Draw units
         ctx.globalAlpha = 1.0;
-        this.units.forEach(unit => {
-            const unitType = unit.getData('unitType') as UnitType;
-            const gridX = unit.getData('gridX');
-            const gridY = unit.getData('gridY');
-            ctx.fillStyle = '#' + COLORS[unitType].toString(16).padStart(6, '0');
-            
-            // Make units slightly larger on minimap for better visibility
-            const unitSize = scale * 1.5;
-            ctx.fillRect(
-                gridX * scale - unitSize/4, 
-                gridY * scale - unitSize/4, 
-                unitSize, 
-                unitSize
-            );
-        });
+        if (this.units) {
+            this.units.forEach(unit => {
+                const unitType = unit.getData('unitType') as UnitType;
+                const gridX = unit.getData('gridX');
+                const gridY = unit.getData('gridY');
+                ctx.fillStyle = '#' + COLORS[unitType].toString(16).padStart(6, '0');
+                
+                // Make units slightly larger on minimap for better visibility
+                const unitSize = scale * 1.5;
+                ctx.fillRect(
+                    gridX * scale - unitSize/4, 
+                    gridY * scale - unitSize/4, 
+                    unitSize, 
+                    unitSize
+                );
+            });
+        }
         
         // Draw viewport rectangle
-        const cam = this.cameras.main;
-        const viewX = cam.scrollX / TILE_SIZE * scale;
-        const viewY = cam.scrollY / TILE_SIZE * scale;
-        const viewWidth = GRID_SIZE * scale;
-        const viewHeight = GRID_SIZE * scale;
-        
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+        if (this.cameras && this.cameras.main) {
+            const cam = this.cameras.main;
+            const viewX = cam.scrollX / TILE_SIZE * scale;
+            const viewY = cam.scrollY / TILE_SIZE * scale;
+            const viewWidth = GRID_SIZE * scale;
+            const viewHeight = GRID_SIZE * scale;
+            
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+        }
     }
 
     // Add a method to update the resource display
@@ -1227,9 +1226,17 @@ class GameScene extends Phaser.Scene {
         if (this.inLobby) {
             this.showLobbyUI(data.players);
         } else {
+            // Safety check - ensure map and units are initialized
+            if (!this.map || this.map.length === 0) {
+                console.log('Map not initialized yet, creating map first');
+                this.createMap();
+            }
+            
             // Clear existing units
-            this.units.forEach(unit => unit.destroy());
-            this.units = [];
+            if (this.units && this.units.length > 0) {
+                this.units.forEach(unit => unit.destroy());
+                this.units = [];
+            }
             
             // Create units from server data without animations
             Object.entries(data.units).forEach(([id, unitData]) => {
@@ -1272,12 +1279,16 @@ class GameScene extends Phaser.Scene {
                 
                 // Mark the tile as occupied
                 if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                    unitData.y >= 0 && unitData.y < MAP_SIZE &&
+                    this.map && this.map[unitData.x] && this.map[unitData.x][unitData.y]) {
                     this.map[unitData.x][unitData.y].setData('occupied', true);
                 }
             });
             
-            this.updateMinimap();
+            // Only update minimap if it's initialized
+            if (this.minimapContext && this.minimapCanvas) {
+                this.updateMinimap();
+            }
         }
     }
 }
@@ -1312,7 +1323,7 @@ const game = new Phaser.Game(config);
 
 // Start the appropriate scene based on the URL
 if (window.location.pathname === '/play') {
-    game.scene.start('GameScene');
+    game.scene.start('GameScene', {}); // Pass an empty object to avoid undefined data
 } else {
     game.scene.start('MainMenu');
 }

@@ -136,7 +136,7 @@ io.on('connection', (socket) => {
       id: gameId,
       players: gamePlayers.map(id => ({ id, team: null, ready: false })),
       mapSize: MAP_SIZE,
-      state: singlePlayer ? 'RUNNING' : 'LOBBY', // Skip lobby for single-player
+      state: singlePlayer ? 'RUNNING' : 'LOBBY',
       units: initialUnits
     };
 
@@ -146,36 +146,25 @@ io.on('connection', (socket) => {
       initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
       initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
       initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
-      
-      // Add player to game room
       const playerSocket = io.sockets.sockets.get(playerId);
       if (playerSocket) {
         playerSocket.join(gameId);
+        console.log(`Player ${playerId} joined room ${gameId}`);
+      } else {
+        console.warn(`Socket for player ${playerId} not found`);
       }
     });
 
+    console.log(`Emitting gameCreated to ${gameId} with ${gamePlayers.length} players`);
     io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
-    
-    // Emit current game state to each new player
-    gamePlayers.forEach(playerId => {
-      const playerSocket = io.sockets.sockets.get(playerId);
-      if (playerSocket) {
-        playerSocket.emit('gameState', { 
-          gameId, 
-          players: games[gameId].players, 
-          units: games[gameId].units 
-        });
-        // For single-player games, immediately start the game
-        if (singlePlayer) {
-          playerSocket.emit('gameStart', { 
-            gameId, 
-            players: games[gameId].players, 
-            units: games[gameId].units 
-          });
-        }
-      }
-    });
-    
+    console.log(`Emitting gameState to ${gameId}`);
+    io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
+
+    if (singlePlayer) {
+      console.log(`Emitting gameStart to ${gameId} for single-player`);
+      io.to(gameId).emit('gameStart', { gameId, players: games[gameId].players, units: games[gameId].units });
+    }
+
     console.log(`Game ${gameId} created with ${gamePlayers.length} players (${singlePlayer ? 'Single-player' : 'Multiplayer'})`);
   }
 
