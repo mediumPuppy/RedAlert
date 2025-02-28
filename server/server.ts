@@ -26,12 +26,12 @@ app.use(express.static(path.join(__dirname, '../client')));
 // Also serve files from the client/dist directory
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-// Add route for the /home path
-app.get('/home', (req, res) => {
+// Add route for the /play path
+app.get('/play', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });
 
-// Catch-all route to handle client-side routing
+// Catch-all route to handle client-side routing (default route is home)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });

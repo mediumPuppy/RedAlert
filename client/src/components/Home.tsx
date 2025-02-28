@@ -75,7 +75,7 @@ const Footer = styled.footer`
 const Home: React.FC = () => {
   const handlePlayClick = () => {
     // Navigate to the game page
-    window.location.href = '/';
+    window.location.href = '/play';
   };
 
   return (
@@ -83,8 +83,7 @@ const Home: React.FC = () => {
       <Title>Red Alert 25</Title>
       <Description>
         A gritty, Cold War-inspired RTS with a retro '90s vibe. Soviets and Allies clash in a tense,
-        alternate history. Thumping industrial beats by Frank Klepacki fuel the chaos of tanks,
-        infantry, and ore harvesters battling across rugged maps.
+        alternate history. Fuel the chaos of tanks, infantry, and ore harvesters battling across rugged maps.
       </Description>
       <PlayButton onClick={handlePlayClick}>Play Now</PlayButton>
       <Footer>Built by Jefferson Lambert - 2025 - Original credit for the game goes to Electronic Arts</Footer>

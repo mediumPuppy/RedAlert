@@ -43,7 +43,7 @@ class MainMenu extends Phaser.Scene {
         this.add.text(centerX, centerY - 100, 'Red Alert 25', {
             fontSize: '48px',
             color: '#ffffff',
-            fontFamily: 'Arial',
+            fontFamily: '"Press Start 2P", cursive',
             backgroundColor: '#ff0000',
             padding: { x: 20, y: 10 }
         }).setOrigin(0.5);
@@ -53,7 +53,8 @@ class MainMenu extends Phaser.Scene {
             fontSize: '32px',
             color: '#ffffff',
             backgroundColor: '#006400',
-            padding: { x: 20, y: 10 }
+            padding: { x: 20, y: 10 },
+            fontFamily: '"Press Start 2P", cursive'
         })
         .setOrigin(0.5)
         .setInteractive({ useHandCursor: true });
@@ -63,7 +64,8 @@ class MainMenu extends Phaser.Scene {
         playButton.on('pointerout', () => playButton.setStyle({ backgroundColor: '#006400' }));
         playButton.on('pointerdown', () => {
             console.log('Play button clicked');
-            this.scene.start('GameScene');
+            // Navigate to the /play route instead of starting the scene directly
+            window.location.href = '/play';
         });
 
         // Sound button
@@ -71,7 +73,8 @@ class MainMenu extends Phaser.Scene {
             fontSize: '32px',
             color: '#ffffff',
             backgroundColor: '#000066',
-            padding: { x: 20, y: 10 }
+            padding: { x: 20, y: 10 },
+            fontFamily: '"Press Start 2P", cursive'
         })
         .setOrigin(0.5)
         .setInteractive({ useHandCursor: true });
@@ -129,12 +132,6 @@ class GameScene extends Phaser.Scene {
 
     create() {
         console.log('GameScene create started');
-        
-        // Show game title
-        const gameTitle = document.getElementById('game-title');
-        if (gameTitle) {
-            gameTitle.style.display = 'block';
-        }
         
         // Create grid-based map with our new implementation
         for (let x = 0; x < MAP_SIZE; x++) {
@@ -990,12 +987,6 @@ class GameScene extends Phaser.Scene {
             this.controlPanel.style.display = 'none';
         }
         
-        // Hide game title
-        const gameTitle = document.getElementById('game-title');
-        if (gameTitle) {
-            gameTitle.style.display = 'none';
-        }
-        
         // Clean up event listeners
         if (this.minimapCanvas) {
             this.minimapCanvas.removeEventListener('click', () => {});
@@ -1026,7 +1017,7 @@ const config = {
         expandParent: true
     },
     backgroundColor: '#333333',
-    scene: [MainMenu, GameScene],
+    scene: window.location.pathname === '/play' ? [GameScene] : [MainMenu],
     physics: {
         default: 'arcade',
         arcade: {
@@ -1035,8 +1026,8 @@ const config = {
     }
 };
 
-// Only initialize Phaser if not on the /home route
-if (window.location.pathname !== '/home') {
+// Initialize Phaser only on the /play route
+if (window.location.pathname === '/play') {
   console.log('Creating Phaser game instance');
   const gameContainer = document.getElementById('game-container') as HTMLElement;
   if (gameContainer) {
@@ -1053,12 +1044,9 @@ if (window.location.pathname !== '/home') {
     }
   });
 } else {
-  // On /home route, hide game container
+  // On any other route, hide game container
   const gameContainer = document.getElementById('game-container');
   if (gameContainer) {
     gameContainer.style.display = 'none'; // Hide game container
   }
-  
-  // Add home-page class to body for styling
-  document.body.classList.add('home-page');
 } 

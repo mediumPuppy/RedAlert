@@ -4,8 +4,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Home from './components/Home';
 import './styles.css';
 
-// Only mount React if on the home route
-if (window.location.pathname === '/home') {
+// Only mount React if on the home/default route
+if (window.location.pathname === '/' || window.location.pathname === '') {
   // Create a root element for React if it doesn't exist
   let rootElement = document.getElementById('react-root');
   if (!rootElement) {
@@ -25,7 +25,7 @@ if (window.location.pathname === '/home') {
     <React.StrictMode>
       <BrowserRouter>
         <Routes>
-          <Route path="/home" element={<Home />} />
+          <Route path="/" element={<Home />} />
         </Routes>
       </BrowserRouter>
     </React.StrictMode>

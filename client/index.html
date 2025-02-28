@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>Red Alert 25</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <style>
     :root {
       --soviet-red: #ff0000;
@@ -59,17 +60,6 @@
       color: var(--white);
       text-shadow: 2px 2px 0 var(--black);
       image-rendering: pixelated;
-    }
-    
-    /* Game title overlay */
-    #game-title {
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      font-size: 24px;
-      color: var(--soviet-red);
-      text-shadow: 2px 2px 0 var(--black);
-      z-index: 1000;
     }
     
     /* Resource counter styling */
@@ -132,7 +122,6 @@
   <div id="react-root"></div>
   <div id="game-container"></div>
   <div id="game-frame"></div>
-  <div id="game-title">Red Alert 25</div>
   <div id="resource-display" class="game-ui-text"></div>
   <div id="control-panel">
     <button class="control-button" id="build-button">Build</button>
