@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType } from '../constants';
 
 export class GameScene extends Scene {
     private map: Phaser.GameObjects.Rectangle[][] = [];
@@ -8,18 +8,12 @@ export class GameScene extends Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
-    private tileSize: number; // Dynamic tile size
 
     constructor() {
         super({ key: 'GameScene' });
-        // Calculate tile size based on smaller dimension to maintain square grid
-        this.tileSize = Math.floor(Math.min(window.innerWidth, window.innerHeight) / GRID_SIZE);
     }
 
     create() {
-        // Recalculate tileSize in case window was resized
-        this.tileSize = Math.floor(Math.min(this.scale.width, this.scale.height) / GRID_SIZE);
-        
         // Create 20x20 grid map
         for (let x = 0; x < GRID_SIZE; x++) {
             this.map[x] = [];
@@ -28,10 +22,10 @@ export class GameScene extends Scene {
                                Math.random() < 0.15 ? 'ORE' : 'GRASS';
                 
                 const tile = this.add.rectangle(
-                    x * this.tileSize + this.tileSize/2,
-                    y * this.tileSize + this.tileSize/2,
-                    this.tileSize,
-                    this.tileSize,
+                    x * TILE_SIZE + TILE_SIZE/2,
+                    y * TILE_SIZE + TILE_SIZE/2,
+                    TILE_SIZE,
+                    TILE_SIZE,
                     COLORS[tileType]
                 );
                 tile.setStrokeStyle(1, 0x000000);
@@ -48,11 +42,11 @@ export class GameScene extends Scene {
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
 
-        // Resource display - scale font size based on tile size
+        // Resource display
         this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
-            fontSize: `${Math.max(16, this.tileSize / 2)}px`,
+            fontSize: '16px',
             color: '#ffffff'
-        });
+        }).setDepth(1); // Ensure visibility
 
         // Handle unit selection
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
@@ -76,8 +70,8 @@ export class GameScene extends Scene {
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (!this.selectedUnit) return;
 
-            const x = Math.floor(pointer.x / this.tileSize);
-            const y = Math.floor(pointer.y / this.tileSize);
+            const x = Math.floor(pointer.x / TILE_SIZE);
+            const y = Math.floor(pointer.y / TILE_SIZE);
 
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
@@ -99,10 +93,10 @@ export class GameScene extends Scene {
     }
 
     private createUnit(type: UnitType, gridX: number, gridY: number) {
-        const size = type === 'INFANTRY' ? this.tileSize/2 : this.tileSize;
+        const size = type === 'INFANTRY' ? TILE_SIZE/2 : TILE_SIZE;
         const unit = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
             size,
             size,
             COLORS[type]
@@ -141,8 +135,8 @@ export class GameScene extends Scene {
         
         this.tweens.add({
             targets: unit,
-            x: x * this.tileSize + this.tileSize/2,
-            y: y * this.tileSize + this.tileSize/2,
+            x: x * TILE_SIZE + TILE_SIZE/2,
+            y: y * TILE_SIZE + TILE_SIZE/2,
             duration: speed * 10,
             ease: 'Linear',
             onComplete: () => {

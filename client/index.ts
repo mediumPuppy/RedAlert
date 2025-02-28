@@ -1,5 +1,5 @@
 // Instead of importing 'phaser', we'll use the global Phaser object from the CDN
-import { GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType } from './game/constants.js';
+import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType } from './game/constants.js';
 
 // Use the global io object from socket.io CDN
 declare const io: any;
@@ -102,12 +102,9 @@ class GameScene extends Phaser.Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
-    private tileSize: number; // Dynamic tile size
 
     constructor() {
         super('GameScene');
-        // Calculate tile size based on smaller dimension
-        this.tileSize = Math.floor(Math.min(window.innerWidth, window.innerHeight) / GRID_SIZE);
     }
 
     preload() {
@@ -118,9 +115,6 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        // Recalculate tileSize in case window was resized
-        this.tileSize = Math.floor(Math.min(this.scale.width, this.scale.height) / GRID_SIZE);
-        
         console.log('GameScene create started');
         // Create grid-based map with our new implementation
         for (let x = 0; x < GRID_SIZE; x++) {
@@ -130,10 +124,10 @@ class GameScene extends Phaser.Scene {
                                Math.random() < 0.1 ? 'ORE' : 'GRASS';
                 
                 const tile = this.add.rectangle(
-                    x * this.tileSize + this.tileSize/2,
-                    y * this.tileSize + this.tileSize/2,
-                    this.tileSize,
-                    this.tileSize,
+                    x * TILE_SIZE + TILE_SIZE/2,
+                    y * TILE_SIZE + TILE_SIZE/2,
+                    TILE_SIZE,
+                    TILE_SIZE,
                     COLORS[tileType]
                 );
                 tile.setStrokeStyle(1, 0x000000);
@@ -152,7 +146,7 @@ class GameScene extends Phaser.Scene {
         this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
             fontSize: '20px',
             color: '#ffffff'
-        });
+        }).setDepth(1);
 
         // Combine both click handlers
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
@@ -170,16 +164,16 @@ class GameScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (this.selectedUnit) {
-                const x = Math.floor(pointer.x / this.tileSize);
-                const y = Math.floor(pointer.y / this.tileSize);
+                const x = Math.floor(pointer.x / TILE_SIZE);
+                const y = Math.floor(pointer.y / TILE_SIZE);
                 
                 if (this.isValidMove(x, y)) {
                     this.moveUnit(this.selectedUnit, x, y);
                     // Emit socket event for multiplayer
                     socket.emit('moveUnit', { 
                         id: this.selectedUnit.getData('id'), 
-                        x: x * this.tileSize + this.tileSize/2, 
-                        y: y * this.tileSize + this.tileSize/2 
+                        x: x * TILE_SIZE + TILE_SIZE/2, 
+                        y: y * TILE_SIZE + TILE_SIZE/2 
                     });
                 }
             }
@@ -225,10 +219,10 @@ class GameScene extends Phaser.Scene {
 
     private createUnit(type: UnitType, gridX: number, gridY: number) {
         const unit = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
-            this.tileSize * 0.8,
-            this.tileSize * 0.8,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
+            TILE_SIZE * 0.8,
+            TILE_SIZE * 0.8,
             COLORS[type]
         );
         
@@ -257,10 +251,10 @@ class GameScene extends Phaser.Scene {
 
     private createBuilding(type: BuildingType, gridX: number, gridY: number) {
         const building = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
-            this.tileSize * 1.2,
-            this.tileSize * 1.2,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
+            TILE_SIZE * 1.2,
+            TILE_SIZE * 1.2,
             COLORS[type]
         );
         
@@ -279,8 +273,8 @@ class GameScene extends Phaser.Scene {
 
     private moveUnit(unit: Phaser.GameObjects.Rectangle, x: number, y: number) {
         // Get current grid position
-        const currentX = Math.floor((unit.x - this.tileSize/2) / this.tileSize);
-        const currentY = Math.floor((unit.y - this.tileSize/2) / this.tileSize);
+        const currentX = Math.floor((unit.x - TILE_SIZE/2) / TILE_SIZE);
+        const currentY = Math.floor((unit.y - TILE_SIZE/2) / TILE_SIZE);
         
         // Mark current position as unoccupied
         if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
@@ -290,8 +284,8 @@ class GameScene extends Phaser.Scene {
         // Move the unit
         this.tweens.add({
             targets: unit,
-            x: x * this.tileSize + this.tileSize/2,
-            y: y * this.tileSize + this.tileSize/2,
+            x: x * TILE_SIZE + TILE_SIZE/2,
+            y: y * TILE_SIZE + TILE_SIZE/2,
             duration: 500
         });
         
@@ -302,12 +296,13 @@ class GameScene extends Phaser.Scene {
 
 const config = {
     type: Phaser.AUTO,
-    width: window.innerWidth,  // Full width
-    height: window.innerHeight, // Full height
+    width: GAME_WIDTH,  // 640px
+    height: GAME_HEIGHT, // 640px
     scale: {
-        mode: Phaser.Scale.FIT, // Scales game to fit while maintaining aspect ratio
-        autoCenter: Phaser.Scale.CENTER_BOTH, // Centers game on screen
-        parent: 'game-container'
+        mode: Phaser.Scale.FIT, // Scale while maintaining aspect ratio
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        parent: 'game-container',
+        expandParent: true
     },
     backgroundColor: '#333333',
     scene: [MainMenu, GameScene],

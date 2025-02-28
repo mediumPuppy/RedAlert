@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS } from '../constants';
+import { GRID_SIZE, COLORS, UNIT_STATS } from '../constants';
 export class GameScene extends Scene {
     constructor() {
         super({ key: 'GameScene' });
@@ -8,15 +8,19 @@ export class GameScene extends Scene {
         this.units = [];
         this.selectedUnit = null;
         this.resources = 1000;
+        // Calculate tile size based on smaller dimension to maintain square grid
+        this.tileSize = Math.floor(Math.min(window.innerWidth, window.innerHeight) / GRID_SIZE);
     }
     create() {
+        // Recalculate tileSize in case window was resized
+        this.tileSize = Math.floor(Math.min(this.scale.width, this.scale.height) / GRID_SIZE);
         // Create 20x20 grid map
         for (let x = 0; x < GRID_SIZE; x++) {
             this.map[x] = [];
             for (let y = 0; y < GRID_SIZE; y++) {
                 const tileType = Math.random() < 0.1 ? 'WATER' :
                     Math.random() < 0.15 ? 'ORE' : 'GRASS';
-                const tile = this.add.rectangle(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, COLORS[tileType]);
+                const tile = this.add.rectangle(x * this.tileSize + this.tileSize / 2, y * this.tileSize + this.tileSize / 2, this.tileSize, this.tileSize, COLORS[tileType]);
                 tile.setStrokeStyle(1, 0x000000);
                 tile.setData('type', tileType);
                 tile.setData('x', x);
@@ -29,9 +33,9 @@ export class GameScene extends Scene {
         this.units.push(this.createUnit('TANK', 2, 2));
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
-        // Resource display
+        // Resource display - scale font size based on tile size
         this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
-            fontSize: '16px',
+            fontSize: `${Math.max(16, this.tileSize / 2)}px`,
             color: '#ffffff'
         });
         // Handle unit selection
@@ -53,8 +57,8 @@ export class GameScene extends Scene {
         this.input.on('pointerdown', (pointer) => {
             if (!this.selectedUnit)
                 return;
-            const x = Math.floor(pointer.x / TILE_SIZE);
-            const y = Math.floor(pointer.y / TILE_SIZE);
+            const x = Math.floor(pointer.x / this.tileSize);
+            const y = Math.floor(pointer.y / this.tileSize);
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
                 // Handle harvesting
@@ -73,8 +77,8 @@ export class GameScene extends Scene {
         this.units = this.units.filter(unit => unit.getData('health') > 0);
     }
     createUnit(type, gridX, gridY) {
-        const size = type === 'INFANTRY' ? TILE_SIZE / 2 : TILE_SIZE;
-        const unit = this.add.rectangle(gridX * TILE_SIZE + TILE_SIZE / 2, gridY * TILE_SIZE + TILE_SIZE / 2, size, size, COLORS[type]);
+        const size = type === 'INFANTRY' ? this.tileSize / 2 : this.tileSize;
+        const unit = this.add.rectangle(gridX * this.tileSize + this.tileSize / 2, gridY * this.tileSize + this.tileSize / 2, size, size, COLORS[type]);
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
@@ -102,8 +106,8 @@ export class GameScene extends Scene {
         const speed = UNIT_STATS[unitType].speed;
         this.tweens.add({
             targets: unit,
-            x: x * TILE_SIZE + TILE_SIZE / 2,
-            y: y * TILE_SIZE + TILE_SIZE / 2,
+            x: x * this.tileSize + this.tileSize / 2,
+            y: y * this.tileSize + this.tileSize / 2,
             duration: speed * 10,
             ease: 'Linear',
             onComplete: () => {
