@@ -103,28 +103,36 @@ io.on('connection', (socket) => {
   }
 
   // Join matchmaking queue
-  socket.on('joinMatchmaking', () => {
-    matchmakingQueue.push(socket.id);
-    socket.emit('matchmakingStarted');
-    console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
+  socket.on('joinMatchmaking', (data = {}) => {
+    const mode = data.mode || 'multiplayer';
+    const isSinglePlayer = mode === 'singleplayer';
 
-    // Start game immediately if we have 2-6 players
-    if (matchmakingQueue.length >= 2 && matchmakingQueue.length <= MAX_PLAYERS_PER_GAME) {
-      const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-      createGame(gamePlayers, false); // Multiplayer game
-    }
+    if (isSinglePlayer) {
+      console.log(`Player ${socket.id} requested single-player game`);
+      createGame([socket.id], true); // Immediate single-player game
+    } else {
+      matchmakingQueue.push(socket.id);
+      socket.emit('matchmakingStarted');
+      console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
 
-    // Set a timeout to handle remaining players
-    setTimeout(() => {
-      if (matchmakingQueue.length >= 1) {
+      // Start game immediately if we have 2-6 players
+      if (matchmakingQueue.length >= 2 && matchmakingQueue.length <= MAX_PLAYERS_PER_GAME) {
         const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-        if (gamePlayers.length === 1) {
-          createGame(gamePlayers, true); // Single-player game
-        } else {
-          createGame(gamePlayers, false); // Multiplayer game with 2+ players
-        }
+        createGame(gamePlayers, false); // Multiplayer game
       }
-    }, MATCHMAKING_TIMEOUT);
+
+      // Set a timeout to handle remaining players
+      setTimeout(() => {
+        if (matchmakingQueue.length >= 1) {
+          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+          if (gamePlayers.length === 1) {
+            createGame(gamePlayers, true); // Single-player game
+          } else {
+            createGame(gamePlayers, false); // Multiplayer game with 2+ players
+          }
+        }
+      }, MATCHMAKING_TIMEOUT);
+    }
   });
 
   // Helper function to create a game with the given players

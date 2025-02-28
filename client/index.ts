@@ -84,7 +84,10 @@ class MainMenu extends Phaser.Scene {
 
         socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
             console.log(`Game created: ${gameId} with ${players.length} players`);
-            this.scene.start('GameScene', { gameId, players });
+            // Get the mode from URL params
+            const urlParams = new URLSearchParams(window.location.search);
+            const mode = urlParams.get('mode') || 'multiplayer';
+            this.scene.start('GameScene', { gameId, players, mode });
         });
     }
 }
@@ -110,14 +113,16 @@ class GameScene extends Phaser.Scene {
     private pendingLobbyUpdate: any = null;
     private pendingGameStart: any = null;
     private initialized: boolean = false;
+    private mode: string | null = null;
 
     constructor() {
         super('GameScene');
     }
 
-    init(data: { gameId?: string, players?: { id: string, team: string | null, ready: boolean }[] }) {
+    init(data: { gameId?: string, players?: { id: string, team: string | null, ready: boolean }[], mode?: string }) {
         if (data) {
             this.gameId = data.gameId || null;
+            this.mode = data.mode || null;
             if (data.players) this.pendingGameCreated = { gameId: data.gameId!, players: data.players };
         }
     }
@@ -130,8 +135,8 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        console.log('GameScene create started');
-        this.inLobby = true;
+        console.log('GameScene create started', { mode: this.mode });
+        this.inLobby = this.mode !== 'singleplayer';
         this.initialized = true;
 
         this.cameras.main.setBackgroundColor('#222222');
@@ -239,6 +244,13 @@ class GameScene extends Phaser.Scene {
             this.inLobby = false;
             this.startGame(this.pendingGameStart);
             this.pendingGameStart = null;
+        }
+
+        // If in single-player mode, emit joinMatchmaking with mode parameter
+        if (this.mode === 'singleplayer' && !this.gameId) {
+            console.log('Single-player mode: Joining matchmaking with singleplayer flag');
+            socket.emit('joinMatchmaking', { mode: 'singleplayer' });
+            waitingText.setText('Starting Single Player Game...');
         }
     }
 
@@ -1321,9 +1333,17 @@ if (gameContainer) {
 }
 const game = new Phaser.Game(config);
 
-// Start the appropriate scene based on the URL
+// Get URL parameters
+const urlParams = new URLSearchParams(window.location.search);
+const mode = urlParams.get('mode');
+
+// Start the appropriate scene based on the URL and mode
 if (window.location.pathname === '/play') {
-    game.scene.start('GameScene', {}); // Pass an empty object to avoid undefined data
+    if (mode === 'singleplayer') {
+        game.scene.start('GameScene', { mode: 'singleplayer' });
+    } else {
+        game.scene.start('MainMenu');
+    }
 } else {
     game.scene.start('MainMenu');
 }

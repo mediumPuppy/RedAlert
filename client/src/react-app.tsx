@@ -2,10 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Home from './components/Home';
+import GameMode from './components/GameMode';
 import './styles.css';
 
-// Only mount React if on the home/default route
-if (window.location.pathname === '/' || window.location.pathname === '') {
+// Only mount React if on the home or game-mode route
+if (window.location.pathname === '/' || window.location.pathname === '' || window.location.pathname === '/game-mode') {
   // Create a root element for React if it doesn't exist
   let rootElement = document.getElementById('react-root');
   if (!rootElement) {
@@ -26,6 +27,7 @@ if (window.location.pathname === '/' || window.location.pathname === '') {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/game-mode" element={<GameMode />} />
         </Routes>
       </BrowserRouter>
     </React.StrictMode>

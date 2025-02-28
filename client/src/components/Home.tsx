@@ -74,8 +74,8 @@ const Footer = styled.footer`
 
 const Home: React.FC = () => {
   const handlePlayClick = () => {
-    // Navigate to the game page
-    window.location.href = '/play';
+    // Navigate to the game mode selection page
+    window.location.href = '/game-mode';
   };
 
   return (
