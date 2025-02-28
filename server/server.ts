@@ -108,23 +108,27 @@ io.on('connection', (socket) => {
     socket.emit('matchmakingStarted');
     console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
 
-    // Attempt to create a game when enough players are queued
-    if (matchmakingQueue.length >= MAX_PLAYERS_PER_GAME) {
-      const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
-      createGame(gamePlayers);
-    } else {
-      // Start a timeout to create a game with fewer players if needed
-      setTimeout(() => {
-        if (matchmakingQueue.length > 0 && matchmakingQueue.length < MAX_PLAYERS_PER_GAME) {
-          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-          createGame(gamePlayers);
-        }
-      }, MATCHMAKING_TIMEOUT);
+    // Start game immediately if we have 2-6 players
+    if (matchmakingQueue.length >= 2 && matchmakingQueue.length <= MAX_PLAYERS_PER_GAME) {
+      const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+      createGame(gamePlayers, false); // Multiplayer game
     }
+
+    // Set a timeout to handle remaining players
+    setTimeout(() => {
+      if (matchmakingQueue.length >= 1) {
+        const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+        if (gamePlayers.length === 1) {
+          createGame(gamePlayers, true); // Single-player game
+        } else {
+          createGame(gamePlayers, false); // Multiplayer game with 2+ players
+        }
+      }
+    }, MATCHMAKING_TIMEOUT);
   });
 
   // Helper function to create a game with the given players
-  function createGame(gamePlayers: string[]) {
+  function createGame(gamePlayers: string[], singlePlayer: boolean) {
     const gameId = `game_${Date.now()}`;
     const initialUnits: Record<string, any> = {};
 
@@ -132,7 +136,7 @@ io.on('connection', (socket) => {
       id: gameId,
       players: gamePlayers.map(id => ({ id, team: null, ready: false })),
       mapSize: MAP_SIZE,
-      state: 'LOBBY',
+      state: singlePlayer ? 'RUNNING' : 'LOBBY', // Skip lobby for single-player
       units: initialUnits
     };
 
@@ -161,10 +165,18 @@ io.on('connection', (socket) => {
           players: games[gameId].players, 
           units: games[gameId].units 
         });
+        // For single-player games, immediately start the game
+        if (singlePlayer) {
+          playerSocket.emit('gameStart', { 
+            gameId, 
+            players: games[gameId].players, 
+            units: games[gameId].units 
+          });
+        }
       }
     });
     
-    console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
+    console.log(`Game ${gameId} created with ${gamePlayers.length} players (${singlePlayer ? 'Single-player' : 'Multiplayer'})`);
   }
 
   // Set team
