@@ -106,8 +106,9 @@ class GameScene extends Phaser.Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
-    private minimap!: Phaser.GameObjects.Graphics; // Minimap graphics object
-    private minimapScale: number = 0.1; // 10% of full map size
+    private minimapCanvas: HTMLCanvasElement | null = null;
+    private minimapContext: CanvasRenderingContext2D | null = null;
+    private minimapContainer: HTMLElement | null = null;
 
     constructor() {
         super('GameScene');
@@ -161,9 +162,12 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
         this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
         
-        // Create minimap
-        this.minimap = this.add.graphics({ x: GAME_WIDTH - MAP_SIZE * this.minimapScale - 10, y: GAME_HEIGHT - MAP_SIZE * this.minimapScale - 10 });
+        // Set up HTML minimap
+        this.setupHtmlMinimap();
         this.updateMinimap();
+        
+        // Set up cleanup when scene stops
+        this.events.on('shutdown', this.cleanupMinimap, this);
 
         // Combine both click handlers
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
@@ -180,28 +184,7 @@ class GameScene extends Phaser.Scene {
         });
 
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-            // Check if click is on minimap
-            const minimapX = GAME_WIDTH - MAP_SIZE * this.minimapScale - 10;
-            const minimapY = GAME_HEIGHT - MAP_SIZE * this.minimapScale - 10;
-            const minimapWidth = MAP_SIZE * this.minimapScale;
-            const minimapHeight = MAP_SIZE * this.minimapScale;
-            
-            if (pointer.x >= minimapX && pointer.x <= minimapX + minimapWidth &&
-                pointer.y >= minimapY && pointer.y <= minimapY + minimapHeight) {
-                // Clicked on minimap - move camera to this location
-                const relativeX = (pointer.x - minimapX) / minimapWidth;
-                const relativeY = (pointer.y - minimapY) / minimapHeight;
-                
-                // Calculate target camera position (center on the clicked point)
-                const targetX = relativeX * MAP_WIDTH - GAME_WIDTH / 2;
-                const targetY = relativeY * MAP_HEIGHT - GAME_HEIGHT / 2;
-                
-                // Bound camera position within map bounds
-                this.cameras.main.scrollX = Math.max(0, Math.min(MAP_WIDTH - GAME_WIDTH, targetX));
-                this.cameras.main.scrollY = Math.max(0, Math.min(MAP_HEIGHT - GAME_HEIGHT, targetY));
-                return; // Don't process as a regular map click
-            }
-            
+            // We're now handling minimap clicks in HTML, so this is only for regular map clicks
             if (this.selectedUnit) {
                 // Account for camera position when calculating grid coordinates
                 const x = Math.floor((pointer.x + this.cameras.main.scrollX) / TILE_SIZE);
@@ -617,40 +600,110 @@ class GameScene extends Phaser.Scene {
         this.updateMinimap();
     }
 
+    private setupHtmlMinimap() {
+        // Get the minimap container and canvas
+        this.minimapContainer = document.getElementById('minimap-container');
+        this.minimapCanvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+        
+        if (this.minimapContainer && this.minimapCanvas) {
+            // Show the minimap container
+            this.minimapContainer.style.display = 'block';
+            
+            // Get the canvas context
+            this.minimapContext = this.minimapCanvas.getContext('2d');
+            
+            // Set canvas size
+            this.minimapCanvas.width = MAP_SIZE * 1.5;
+            this.minimapCanvas.height = MAP_SIZE * 1.5;
+            
+            // Add click listener to minimap
+            this.minimapCanvas.addEventListener('click', (event) => {
+                const rect = this.minimapCanvas!.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                
+                // Convert click position to map position
+                const relativeX = x / this.minimapCanvas!.width;
+                const relativeY = y / this.minimapCanvas!.height;
+                
+                // Calculate target camera position (center on the clicked point)
+                const targetX = relativeX * MAP_WIDTH - GAME_WIDTH / 2;
+                const targetY = relativeY * MAP_HEIGHT - GAME_HEIGHT / 2;
+                
+                // Bound camera position within map bounds
+                this.cameras.main.scrollX = Math.max(0, Math.min(MAP_WIDTH - GAME_WIDTH, targetX));
+                this.cameras.main.scrollY = Math.max(0, Math.min(MAP_HEIGHT - GAME_HEIGHT, targetY));
+            });
+        }
+    }
+    
+    // Method to clean up minimap when scene is stopped
+    private cleanupMinimap() {
+        // Hide the minimap container when leaving the scene
+        if (this.minimapContainer) {
+            this.minimapContainer.style.display = 'none';
+        }
+        
+        // Clean up event listeners
+        if (this.minimapCanvas) {
+            // Clean up would be better with a named function reference
+            // But for now we'll just remove all
+            this.minimapCanvas.removeEventListener('click', () => {});
+        }
+    }
+
     private updateMinimap() {
-        this.minimap.clear();
-
-        // Draw full map background
-        this.minimap.fillStyle(0x333333, 1); // Gray background
-        this.minimap.fillRect(0, 0, MAP_SIZE * this.minimapScale, MAP_SIZE * this.minimapScale);
-
+        if (!this.minimapContext || !this.minimapCanvas) return;
+        
+        const ctx = this.minimapContext;
+        const scale = 1.5; // Scale for minimap
+        
+        // Clear the canvas
+        ctx.clearRect(0, 0, this.minimapCanvas.width, this.minimapCanvas.height);
+        
+        // Draw background
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, MAP_SIZE * scale, MAP_SIZE * scale);
+        
         // Draw tiles
         for (let x = 0; x < MAP_SIZE; x++) {
             for (let y = 0; y < MAP_SIZE; y++) {
                 const tile = this.map[x][y];
                 const tileType = tile.getData('type') as TileType;
-                this.minimap.fillStyle(COLORS[tileType], 0.7);
-                this.minimap.fillRect(x * this.minimapScale, y * this.minimapScale, this.minimapScale, this.minimapScale);
+                ctx.fillStyle = '#' + COLORS[tileType].toString(16).padStart(6, '0');
+                ctx.globalAlpha = 0.7;
+                ctx.fillRect(x * scale, y * scale, scale, scale);
             }
         }
-
+        
         // Draw units
+        ctx.globalAlpha = 1.0;
         this.units.forEach(unit => {
             const unitType = unit.getData('unitType') as UnitType;
             const gridX = unit.getData('gridX');
             const gridY = unit.getData('gridY');
-            this.minimap.fillStyle(COLORS[unitType], 1);
-            this.minimap.fillRect(gridX * this.minimapScale, gridY * this.minimapScale, this.minimapScale * 2, this.minimapScale * 2);
+            ctx.fillStyle = '#' + COLORS[unitType].toString(16).padStart(6, '0');
+            
+            // Make units slightly larger on minimap for better visibility
+            const unitSize = scale * 1.5;
+            ctx.fillRect(
+                gridX * scale - unitSize/4, 
+                gridY * scale - unitSize/4, 
+                unitSize, 
+                unitSize
+            );
         });
-
+        
         // Draw viewport rectangle
         const cam = this.cameras.main;
-        const viewX = cam.scrollX / TILE_SIZE * this.minimapScale;
-        const viewY = cam.scrollY / TILE_SIZE * this.minimapScale;
-        const viewWidth = GRID_SIZE * this.minimapScale;
-        const viewHeight = GRID_SIZE * this.minimapScale;
-        this.minimap.lineStyle(2, 0xffffff, 1);
-        this.minimap.strokeRect(viewX, viewY, viewWidth, viewHeight);
+        const viewX = cam.scrollX / TILE_SIZE * scale;
+        const viewY = cam.scrollY / TILE_SIZE * scale;
+        const viewWidth = GRID_SIZE * scale;
+        const viewHeight = GRID_SIZE * scale;
+        
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
     }
 }
 
