@@ -5,7 +5,6 @@ import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, Tile
 export class GameScene extends Scene {
     private map: Phaser.GameObjects.Rectangle[][] = [];
     private units: Phaser.GameObjects.Rectangle[] = [];
-    private buildings: Phaser.GameObjects.Rectangle[] = [];
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
@@ -36,15 +35,13 @@ export class GameScene extends Scene {
                 this.map[x][y] = tile;
             }
         }
-        this.updateMapPositions();
+        this.updateMapPositions(); // Position tiles initially
     }
 
     private createInitialUnits() {
-        this.units = []; // Clear existing units
         this.units.push(this.createUnit('TANK', 2, 2));
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
-        this.updateUnitPositions();
     }
 
     private createUI() {
@@ -52,7 +49,7 @@ export class GameScene extends Scene {
             fontSize: '16px',
             color: '#ffffff'
         }).setDepth(1);
-        this.updateUIPositions();
+        this.updateUIPositions(); // Position UI initially
     }
 
     private setupInput() {
@@ -85,8 +82,7 @@ export class GameScene extends Scene {
     }
 
     update() {
-        // Remove destroyed units from our tracking array
-        this.units = this.units.filter(unit => unit.active);
+        this.units = this.units.filter(unit => unit.getData('health') > 0);
     }
 
     private getScaleFactor(): number {
@@ -94,7 +90,7 @@ export class GameScene extends Scene {
     }
 
     private createUnit(type: UnitType, gridX: number, gridY: number) {
-        const size = type === 'INFANTRY' ? TILE_SIZE/2 : TILE_SIZE * 0.8;
+        const size = type === 'INFANTRY' ? TILE_SIZE/2 : TILE_SIZE;
         const unit = this.add.rectangle(0, 0, size, size, COLORS[type]);
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
@@ -105,7 +101,7 @@ export class GameScene extends Scene {
         unit.setData('gridX', gridX);
         unit.setData('gridY', gridY);
         unit.setInteractive();
-        this.updateUnitPosition(unit);
+        this.updateUnitPosition(unit); // Position unit initially
         return unit;
     }
 
@@ -125,11 +121,9 @@ export class GameScene extends Scene {
 
     private updateUnitPositions() {
         this.units.forEach(unit => this.updateUnitPosition(unit));
-        this.buildings.forEach(building => this.updateBuildingPosition(building));
     }
 
     private updateUnitPosition(unit: Phaser.GameObjects.Rectangle) {
-        if (!unit.active) return;
         const scaleFactor = this.getScaleFactor();
         const gridX = unit.getData('gridX');
         const gridY = unit.getData('gridY');
@@ -138,18 +132,6 @@ export class GameScene extends Scene {
             (gridY * TILE_SIZE + TILE_SIZE/2) * scaleFactor
         );
         unit.setScale(scaleFactor);
-    }
-
-    private updateBuildingPosition(building: Phaser.GameObjects.Rectangle) {
-        if (!building.active) return;
-        const scaleFactor = this.getScaleFactor();
-        const gridX = building.getData('gridX');
-        const gridY = building.getData('gridY');
-        building.setPosition(
-            (gridX * TILE_SIZE + TILE_SIZE/2) * scaleFactor,
-            (gridY * TILE_SIZE + TILE_SIZE/2) * scaleFactor
-        );
-        building.setScale(scaleFactor);
     }
 
     private updateUIPositions() {
@@ -170,7 +152,6 @@ export class GameScene extends Scene {
         
         // Check if position is occupied by another unit
         const occupied = this.units.some(unit => 
-            unit.active &&
             unit.getData('gridX') === x && 
             unit.getData('gridY') === y && 
             unit !== this.selectedUnit
@@ -182,22 +163,17 @@ export class GameScene extends Scene {
     private moveUnit(unit: Phaser.GameObjects.Rectangle, x: number, y: number) {
         const unitType = unit.getData('unitType') as UnitType;
         const speed = UNIT_STATS[unitType].speed;
-        const scaleFactor = this.getScaleFactor();
-        
-        // Update grid position immediately
-        unit.setData('gridX', x);
-        unit.setData('gridY', y);
-        
-        // Calculate scaled position
-        const targetX = (x * TILE_SIZE + TILE_SIZE/2) * scaleFactor;
-        const targetY = (y * TILE_SIZE + TILE_SIZE/2) * scaleFactor;
         
         this.tweens.add({
             targets: unit,
-            x: targetX,
-            y: targetY,
+            x: x * TILE_SIZE + TILE_SIZE/2,
+            y: y * TILE_SIZE + TILE_SIZE/2,
             duration: speed * 10,
-            ease: 'Linear'
+            ease: 'Linear',
+            onComplete: () => {
+                unit.setData('gridX', x);
+                unit.setData('gridY', y);
+            }
         });
     }
 
@@ -216,21 +192,13 @@ export class GameScene extends Scene {
             target.setData('health', targetHealth);
 
             if (targetHealth <= 0) {
-                const index = this.units.indexOf(target);
-                if (index > -1) {
-                    this.units.splice(index, 1);
-                }
                 target.destroy();
             }
             
             // Visual feedback
             const originalColor = target.fillColor;
             target.setFillStyle(0xff0000);
-            this.time.delayedCall(100, () => {
-                if (target.active) {
-                    target.setFillStyle(originalColor);
-                }
-            });
+            this.time.delayedCall(100, () => target.setFillStyle(originalColor));
         }
     }
 
