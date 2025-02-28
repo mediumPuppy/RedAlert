@@ -77,6 +77,31 @@ io.on('connection', (socket) => {
   // Send map size to new clients
   socket.emit('mapSize', { width: MAP_SIZE, height: MAP_SIZE });
 
+  // Check if player is reconnecting to an existing game
+  const existingGameId = Object.keys(games).find(id => games[id].players.some(p => p.id === socket.id));
+  if (existingGameId) {
+    const game = games[existingGameId];
+    socket.join(existingGameId);
+    socket.emit('gameState', { 
+      gameId: existingGameId, 
+      players: game.players, 
+      units: game.units 
+    });
+    if (game.state === 'RUNNING') {
+      socket.emit('gameStart', { 
+        gameId: existingGameId, 
+        players: game.players, 
+        units: game.units 
+      });
+    } else {
+      socket.emit('gameCreated', { 
+        gameId: existingGameId, 
+        players: game.players 
+      });
+    }
+    console.log(`Player ${socket.id} reconnected to game ${existingGameId}`);
+  }
+
   // Join matchmaking queue
   socket.on('joinMatchmaking', () => {
     matchmakingQueue.push(socket.id);
@@ -126,6 +151,19 @@ io.on('connection', (socket) => {
     });
 
     io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
+    
+    // Emit current game state to each new player
+    gamePlayers.forEach(playerId => {
+      const playerSocket = io.sockets.sockets.get(playerId);
+      if (playerSocket) {
+        playerSocket.emit('gameState', { 
+          gameId, 
+          players: games[gameId].players, 
+          units: games[gameId].units 
+        });
+      }
+    });
+    
     console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
   }
 

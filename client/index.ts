@@ -232,6 +232,15 @@ class GameScene extends Phaser.Scene {
             }
         });
         
+        // Handle game state updates (for reconnections and initial state)
+        socket.on('gameState', (data: { 
+            gameId: string, 
+            players: { id: string, team: string | null, ready: boolean }[], 
+            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
+        }) => {
+            this.handleGameState(data);
+        });
+        
         // Handle disconnection from server
         socket.on('disconnect', () => {
             if (this.inLobby) {
@@ -369,51 +378,8 @@ class GameScene extends Phaser.Scene {
         // Create the game map
         this.createMap();
         
-        // Create units from server data
-        Object.entries(data.units).forEach(([id, unitData]) => {
-            const unit = this.add.rectangle(
-                unitData.x * TILE_SIZE + TILE_SIZE/2,
-                unitData.y * TILE_SIZE + TILE_SIZE/2,
-                unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
-                unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
-                COLORS[unitData.type as UnitType]
-            );
-            
-            unit.setStrokeStyle(1, 0x000000);
-            unit.setInteractive();
-            unit.setData('type', 'UNIT');
-            unit.setData('unitType', unitData.type);
-            unit.setData('id', id);
-            unit.setData('originalColor', COLORS[unitData.type as UnitType]);
-            unit.setData('facing', unitData.facing);
-            unit.setAngle(unitData.facing);
-            unit.setData('gridX', unitData.x);
-            unit.setData('gridY', unitData.y);
-            unit.setData('owner', unitData.owner);
-            
-            // Only allow selection of units owned by this player
-            if (unitData.owner === socket.id) {
-                unit.setData('selectable', true);
-            }
-            
-            const stats = UNIT_STATS[unitData.type as UnitType];
-            unit.setData('health', stats.health);
-            unit.setData('damage', stats.damage || 0);
-            unit.setData('range', stats.range || 1);
-            unit.setData('speed', stats.speed);
-            
-            if (unitData.type === 'HARVESTER') {
-                unit.setData('capacity', stats.capacity || 100);
-            }
-            
-            this.units.push(unit);
-            
-            // Mark the tile as occupied
-            if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                this.map[unitData.x][unitData.y].setData('occupied', true);
-            }
-        });
+        // Use handleGameState to ensure latest state is applied
+        this.handleGameState(data);
         
         // Set up the game UI
         this.setupHtmlMinimap();
@@ -1250,6 +1216,69 @@ class GameScene extends Phaser.Scene {
                 this.setMode('normal');
             }
         });
+    }
+
+    private handleGameState(data: { 
+        gameId: string, 
+        players: { id: string, team: string | null, ready: boolean }[], 
+        units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }> 
+    }) {
+        this.gameId = data.gameId;
+        if (this.inLobby) {
+            this.showLobbyUI(data.players);
+        } else {
+            // Clear existing units
+            this.units.forEach(unit => unit.destroy());
+            this.units = [];
+            
+            // Create units from server data without animations
+            Object.entries(data.units).forEach(([id, unitData]) => {
+                const unit = this.add.rectangle(
+                    unitData.x * TILE_SIZE + TILE_SIZE/2,
+                    unitData.y * TILE_SIZE + TILE_SIZE/2,
+                    unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
+                    unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
+                    COLORS[unitData.type as UnitType]
+                );
+                
+                unit.setStrokeStyle(1, 0x000000);
+                unit.setInteractive();
+                unit.setData('type', 'UNIT');
+                unit.setData('unitType', unitData.type);
+                unit.setData('id', id);
+                unit.setData('originalColor', COLORS[unitData.type as UnitType]);
+                unit.setData('facing', unitData.facing);
+                unit.setAngle(unitData.facing);
+                unit.setData('gridX', unitData.x);
+                unit.setData('gridY', unitData.y);
+                unit.setData('owner', unitData.owner);
+                
+                // Only allow selection of units owned by this player
+                if (unitData.owner === socket.id) {
+                    unit.setData('selectable', true);
+                }
+                
+                const stats = UNIT_STATS[unitData.type as UnitType];
+                unit.setData('health', stats.health);
+                unit.setData('damage', stats.damage || 0);
+                unit.setData('range', stats.range || 1);
+                unit.setData('speed', stats.speed);
+                
+                if (unitData.type === 'HARVESTER') {
+                    unit.setData('capacity', stats.capacity || 100);
+                }
+                
+                this.units.push(unit);
+                
+                // Mark the tile as occupied
+                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                    this.map[unitData.x][unitData.y].setData('occupied', true);
+                }
+            });
+            
+            this.updateMinimap();
+        }
     }
 }
 
