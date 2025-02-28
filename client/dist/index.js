@@ -147,6 +147,7 @@ class GameScene extends Phaser.Scene {
                 const unitType = unit.getData('unitType');
                 const currentX = unit.getData('gridX');
                 const currentY = unit.getData('gridY');
+                const originalColor = unit.fillColor; // Preserve color
                 // Clear current position
                 if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
                     this.map[currentX][currentY].setData('occupied', false);
@@ -167,12 +168,11 @@ class GameScene extends Phaser.Scene {
                                 duration: data.duration,
                                 ease: 'Linear',
                                 onComplete: () => {
-                                    const newX = Math.floor(data.x);
-                                    const newY = Math.floor(data.y);
-                                    unit.setData('gridX', newX);
-                                    unit.setData('gridY', newY);
-                                    if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
-                                        this.map[newX][newY].setData('occupied', true);
+                                    unit.setData('gridX', data.x);
+                                    unit.setData('gridY', data.y);
+                                    unit.setFillStyle(originalColor); // Restore color
+                                    if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
+                                        this.map[data.x][data.y].setData('occupied', true);
                                     }
                                 }
                             });
@@ -190,12 +190,11 @@ class GameScene extends Phaser.Scene {
                         duration: data.duration,
                         ease: 'Linear',
                         onComplete: () => {
-                            const newX = Math.floor(data.x);
-                            const newY = Math.floor(data.y);
-                            unit.setData('gridX', newX);
-                            unit.setData('gridY', newY);
-                            if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
-                                this.map[newX][newY].setData('occupied', true);
+                            unit.setData('gridX', data.x);
+                            unit.setData('gridY', data.y);
+                            unit.setFillStyle(originalColor); // Restore color
+                            if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
+                                this.map[data.x][data.y].setData('occupied', true);
                             }
                         }
                     });

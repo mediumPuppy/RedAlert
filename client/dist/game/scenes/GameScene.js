@@ -100,6 +100,7 @@ export class GameScene extends Scene {
         unit.setInteractive();
         this.units.push(unit); // Explicitly track the unit
         this.updateUnitPosition(unit); // Position unit initially
+        console.log(`Created unit ${type} with ID ${unit.getData('id')} and color ${COLORS[type].toString(16)}`); // Debug
         return unit;
     }
     updateMapPositions() {
@@ -183,6 +184,8 @@ export class GameScene extends Scene {
         const unitType = unit.getData('unitType');
         const currentX = unit.getData('gridX');
         const currentY = unit.getData('gridY');
+        const originalColor = unit.fillColor;
+        console.log(`moveUnit: Unit ${unit.getData('id')} (${unitType}) color before move: ${originalColor.toString(16)}`); // Debug
         const targetTile = this.map[x][y];
         const terrainType = targetTile.getData('type');
         const terrainModifier = TERRAIN_SPEED_MODIFIERS[terrainType];
@@ -243,6 +246,7 @@ export class GameScene extends Scene {
         const scaleFactor = this.getScaleFactor();
         const targetX = (x * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
         const targetY = (y * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
+        const originalColor = unit.fillColor; // Store original color
         this.tweens.add({
             targets: unit,
             x: targetX,
@@ -252,6 +256,7 @@ export class GameScene extends Scene {
             onComplete: () => {
                 unit.setData('gridX', x);
                 unit.setData('gridY', y);
+                unit.setFillStyle(originalColor); // Restore original color
             }
         });
     }
@@ -272,8 +277,12 @@ export class GameScene extends Scene {
             }
             // Visual feedback
             const originalColor = target.fillColor;
+            console.log(`Attack: Target original color: ${originalColor.toString(16)}`); // Debug
             target.setFillStyle(0xff0000);
-            this.time.delayedCall(100, () => target.setFillStyle(originalColor));
+            this.time.delayedCall(100, () => {
+                target.setFillStyle(originalColor);
+                console.log(`Attack: Restored target color to: ${originalColor.toString(16)}`); // Debug
+            });
             // Face the target when attacking
             const targetFacing = this.calculateFacing(attackerX, attackerY, targetX, targetY);
             attacker.setAngle(targetFacing);
