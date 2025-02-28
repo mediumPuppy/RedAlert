@@ -1,5 +1,5 @@
 // Instead of importing 'phaser', we'll use the global Phaser object from the CDN
-import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from './game/constants.js';
+import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from './game/constants';
 
 // Use the global io object from socket.io CDN
 declare const io: any;
@@ -40,7 +40,7 @@ class MainMenu extends Phaser.Scene {
         const centerY = this.cameras.main.height / 2;
 
         // Title with debug background
-        this.add.text(centerX, centerY - 100, 'Red Alert Reborn', {
+        this.add.text(centerX, centerY - 100, 'Red Alert 25', {
             fontSize: '48px',
             color: '#ffffff',
             fontFamily: 'Arial',
@@ -109,6 +109,12 @@ class GameScene extends Phaser.Scene {
     private minimapCanvas: HTMLCanvasElement | null = null;
     private minimapContext: CanvasRenderingContext2D | null = null;
     private minimapContainer: HTMLElement | null = null;
+    private resourceDisplay: HTMLElement | null = null;
+    private controlPanel: HTMLElement | null = null;
+    private buildButton: HTMLElement | null = null;
+    private attackButton: HTMLElement | null = null;
+    private harvestButton: HTMLElement | null = null;
+    private currentMode: 'normal' | 'build' | 'attack' | 'harvest' = 'normal';
 
     constructor() {
         super('GameScene');
@@ -123,6 +129,13 @@ class GameScene extends Phaser.Scene {
 
     create() {
         console.log('GameScene create started');
+        
+        // Show game title
+        const gameTitle = document.getElementById('game-title');
+        if (gameTitle) {
+            gameTitle.style.display = 'block';
+        }
+        
         // Create grid-based map with our new implementation
         for (let x = 0; x < MAP_SIZE; x++) {
             this.map[x] = [];
@@ -149,11 +162,20 @@ class GameScene extends Phaser.Scene {
         this.createUnit('HARVESTER', 4, 2);
         this.createBuilding('BASE', 1, 1);
 
-        // Keep your existing ore counter but use our resources system
-        this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
-            fontSize: '20px',
-            color: '#ffffff'
-        }).setDepth(1);
+        // Get the resource display element
+        this.resourceDisplay = document.getElementById('resource-display');
+        if (this.resourceDisplay) {
+            this.updateResourceDisplay();
+        } else {
+            // Fallback to Phaser text if HTML element not found
+            this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
+                fontSize: '20px',
+                color: '#ffffff'
+            }).setDepth(1);
+        }
+
+        // Set up control panel
+        this.setupControlPanel();
 
         // Set up camera for large map
         this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
@@ -167,7 +189,7 @@ class GameScene extends Phaser.Scene {
         this.updateMinimap();
         
         // Set up cleanup when scene stops
-        this.events.on('shutdown', this.cleanupMinimap, this);
+        this.events.on('shutdown', this.cleanupUI, this);
 
         // Combine both click handlers
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
@@ -180,6 +202,9 @@ class GameScene extends Phaser.Scene {
                 
                 // Emit socket event for multiplayer
                 socket.emit('selectUnit', { id: gameObject.getData('id') });
+                
+                // Enable/disable buttons based on unit type
+                this.updateControlButtons();
             }
         });
 
@@ -190,9 +215,18 @@ class GameScene extends Phaser.Scene {
                 const x = Math.floor((pointer.x + this.cameras.main.scrollX) / TILE_SIZE);
                 const y = Math.floor((pointer.y + this.cameras.main.scrollY) / TILE_SIZE);
                 
-                if (this.isValidMove(x, y)) {
+                if (this.currentMode === 'normal' && this.isValidMove(x, y)) {
                     this.moveUnit(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'attack') {
+                    this.attackLocation(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'harvest' && this.selectedUnit.getData('unitType') === 'HARVESTER') {
+                    this.harvestLocation(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'build') {
+                    this.buildStructure(x, y);
                 }
+                
+                // Reset mode after action
+                this.setMode('normal');
             }
         });
 
@@ -644,6 +678,11 @@ class GameScene extends Phaser.Scene {
             this.minimapContainer.style.display = 'none';
         }
         
+        // Hide the resource display
+        if (this.resourceDisplay) {
+            this.resourceDisplay.textContent = '';
+        }
+        
         // Clean up event listeners
         if (this.minimapCanvas) {
             // Clean up would be better with a named function reference
@@ -705,6 +744,275 @@ class GameScene extends Phaser.Scene {
         ctx.lineWidth = 2;
         ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
     }
+
+    // Add a method to update the resource display
+    private updateResourceDisplay() {
+        if (this.resourceDisplay) {
+            this.resourceDisplay.textContent = `Resources: ${this.resources}`;
+        } else if (this.resourceText) {
+            this.resourceText.setText(`Resources: ${this.resources}`);
+        }
+    }
+
+    private harvest(harvester: Phaser.GameObjects.Rectangle, oreTile: Phaser.GameObjects.Rectangle) {
+        const harvestAmount = 50;
+        this.resources += harvestAmount;
+        this.updateResourceDisplay();
+        
+        // Visual feedback
+        const originalColor = oreTile.fillColor;
+        oreTile.setFillStyle(0xffffff);
+        this.time.delayedCall(200, () => oreTile.setFillStyle(originalColor));
+    }
+
+    private setupControlPanel() {
+        this.controlPanel = document.getElementById('control-panel');
+        this.buildButton = document.getElementById('build-button');
+        this.attackButton = document.getElementById('attack-button');
+        this.harvestButton = document.getElementById('harvest-button');
+        
+        if (this.controlPanel) {
+            this.controlPanel.style.display = 'flex';
+        }
+        
+        // Add event listeners to buttons
+        if (this.buildButton) {
+            this.buildButton.addEventListener('click', () => this.setMode('build'));
+        }
+        
+        if (this.attackButton) {
+            this.attackButton.addEventListener('click', () => this.setMode('attack'));
+        }
+        
+        if (this.harvestButton) {
+            this.harvestButton.addEventListener('click', () => this.setMode('harvest'));
+        }
+        
+        // Initially disable all buttons until a unit is selected
+        this.updateControlButtons();
+    }
+    
+    private updateControlButtons() {
+        if (!this.selectedUnit) {
+            // Disable all buttons if no unit selected
+            if (this.buildButton) this.buildButton.setAttribute('disabled', 'true');
+            if (this.attackButton) this.attackButton.setAttribute('disabled', 'true');
+            if (this.harvestButton) this.harvestButton.setAttribute('disabled', 'true');
+            return;
+        }
+        
+        const unitType = this.selectedUnit.getData('unitType') as UnitType;
+        
+        // Enable/disable buttons based on unit type
+        if (this.buildButton) {
+            if (unitType === 'INFANTRY') {
+                this.buildButton.removeAttribute('disabled');
+            } else {
+                this.buildButton.setAttribute('disabled', 'true');
+            }
+        }
+        
+        if (this.attackButton) {
+            if (unitType === 'TANK' || unitType === 'INFANTRY') {
+                this.attackButton.removeAttribute('disabled');
+            } else {
+                this.attackButton.setAttribute('disabled', 'true');
+            }
+        }
+        
+        if (this.harvestButton) {
+            if (unitType === 'HARVESTER') {
+                this.harvestButton.removeAttribute('disabled');
+            } else {
+                this.harvestButton.setAttribute('disabled', 'true');
+            }
+        }
+    }
+    
+    private setMode(mode: 'normal' | 'build' | 'attack' | 'harvest') {
+        this.currentMode = mode;
+        
+        // Update button styles to show active mode
+        if (this.buildButton) {
+            this.buildButton.style.backgroundColor = mode === 'build' ? 'var(--ore-yellow)' : 'var(--allied-blue)';
+            this.buildButton.style.color = mode === 'build' ? 'var(--black)' : 'var(--white)';
+        }
+        
+        if (this.attackButton) {
+            this.attackButton.style.backgroundColor = mode === 'attack' ? 'var(--ore-yellow)' : 'var(--allied-blue)';
+            this.attackButton.style.color = mode === 'attack' ? 'var(--black)' : 'var(--white)';
+        }
+        
+        if (this.harvestButton) {
+            this.harvestButton.style.backgroundColor = mode === 'harvest' ? 'var(--ore-yellow)' : 'var(--allied-blue)';
+            this.harvestButton.style.color = mode === 'harvest' ? 'var(--black)' : 'var(--white)';
+        }
+    }
+    
+    private attackLocation(unit: Phaser.GameObjects.Rectangle, x: number, y: number) {
+        // Check if there's a valid target at the location
+        if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) {
+            return;
+        }
+        
+        // Find a target at the location
+        const target = this.units.find(u => 
+            u.getData('gridX') === x && 
+            u.getData('gridY') === y && 
+            u !== unit
+        );
+        
+        if (target) {
+            // Move close to the target if not in range
+            const unitX = unit.getData('gridX');
+            const unitY = unit.getData('gridY');
+            const range = unit.getData('range') || 1;
+            
+            const distance = Phaser.Math.Distance.Between(unitX, unitY, x, y);
+            
+            if (distance > range) {
+                // Find a position within range
+                const angle = Phaser.Math.Angle.Between(unitX, unitY, x, y);
+                const newX = Math.round(x - Math.cos(angle) * range);
+                const newY = Math.round(y - Math.sin(angle) * range);
+                
+                // Move to the position first, then attack
+                if (this.isValidMove(newX, newY)) {
+                    this.moveUnit(unit, newX, newY);
+                    
+                    // After moving, attack
+                    this.time.delayedCall(1000, () => {
+                        this.performAttack(unit, target);
+                    });
+                }
+            } else {
+                // Already in range, attack directly
+                this.performAttack(unit, target);
+            }
+        }
+    }
+    
+    private performAttack(attacker: Phaser.GameObjects.Rectangle, target: Phaser.GameObjects.Rectangle) {
+        const damage = attacker.getData('damage') || 10;
+        const targetHealth = target.getData('health') || 0;
+        const newHealth = Math.max(0, targetHealth - damage);
+        
+        target.setData('health', newHealth);
+        
+        // Visual feedback
+        const originalColor = target.fillColor;
+        target.setFillStyle(0xff0000);
+        this.time.delayedCall(200, () => {
+            if (newHealth <= 0) {
+                // Target destroyed
+                const index = this.units.indexOf(target);
+                if (index !== -1) {
+                    this.units.splice(index, 1);
+                }
+                target.destroy();
+            } else {
+                target.setFillStyle(originalColor);
+            }
+        });
+    }
+    
+    private harvestLocation(harvester: Phaser.GameObjects.Rectangle, x: number, y: number) {
+        if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) {
+            return;
+        }
+        
+        const tile = this.map[x][y];
+        if (tile.getData('type') === 'ORE') {
+            // Move to the ore tile first if not adjacent
+            const harvesterX = harvester.getData('gridX');
+            const harvesterY = harvester.getData('gridY');
+            
+            const distance = Phaser.Math.Distance.Between(harvesterX, harvesterY, x, y);
+            
+            if (distance > 1) {
+                // Find an adjacent position
+                const positions = [
+                    {x: x+1, y: y}, {x: x-1, y: y}, 
+                    {x: x, y: y+1}, {x: x, y: y-1}
+                ];
+                
+                // Filter valid positions
+                const validPositions = positions.filter(pos => this.isValidMove(pos.x, pos.y));
+                
+                if (validPositions.length > 0) {
+                    // Move to the closest valid position
+                    const closest = validPositions.reduce((prev, curr) => {
+                        const prevDist = Phaser.Math.Distance.Between(harvesterX, harvesterY, prev.x, prev.y);
+                        const currDist = Phaser.Math.Distance.Between(harvesterX, harvesterY, curr.x, curr.y);
+                        return prevDist < currDist ? prev : curr;
+                    });
+                    
+                    this.moveUnit(harvester, closest.x, closest.y);
+                    
+                    // After moving, harvest
+                    this.time.delayedCall(1000, () => {
+                        this.harvest(harvester, tile);
+                    });
+                }
+            } else {
+                // Already adjacent, harvest directly
+                this.harvest(harvester, tile);
+            }
+        }
+    }
+    
+    private buildStructure(x: number, y: number) {
+        if (!this.isValidMove(x, y) || this.resources < 500) {
+            return;
+        }
+        
+        // Deduct resources
+        this.resources -= 500;
+        this.updateResourceDisplay();
+        
+        // Create a new building
+        this.createBuilding('BARRACKS', x, y);
+    }
+
+    private cleanupUI() {
+        // Hide the minimap container when leaving the scene
+        if (this.minimapContainer) {
+            this.minimapContainer.style.display = 'none';
+        }
+        
+        // Hide the resource display
+        if (this.resourceDisplay) {
+            this.resourceDisplay.textContent = '';
+        }
+        
+        // Hide the control panel
+        if (this.controlPanel) {
+            this.controlPanel.style.display = 'none';
+        }
+        
+        // Hide game title
+        const gameTitle = document.getElementById('game-title');
+        if (gameTitle) {
+            gameTitle.style.display = 'none';
+        }
+        
+        // Clean up event listeners
+        if (this.minimapCanvas) {
+            this.minimapCanvas.removeEventListener('click', () => {});
+        }
+        
+        if (this.buildButton) {
+            this.buildButton.removeEventListener('click', () => {});
+        }
+        
+        if (this.attackButton) {
+            this.attackButton.removeEventListener('click', () => {});
+        }
+        
+        if (this.harvestButton) {
+            this.harvestButton.removeEventListener('click', () => {});
+        }
+    }
 }
 
 const config = {
@@ -727,14 +1035,30 @@ const config = {
     }
 };
 
-console.log('Creating Phaser game instance');
-const game = new Phaser.Game(config);
+// Only initialize Phaser if not on the /home route
+if (window.location.pathname !== '/home') {
+  console.log('Creating Phaser game instance');
+  const gameContainer = document.getElementById('game-container') as HTMLElement;
+  if (gameContainer) {
+    gameContainer.style.display = 'block'; // Show game container
+  }
+  const game = new Phaser.Game(config);
 
-// Handle window resize
-window.addEventListener('resize', () => {
+  // Handle window resize
+  window.addEventListener('resize', () => {
     game.scale.resize(window.innerWidth, window.innerHeight);
     const gameScene = game.scene.getScene('GameScene') as GameScene;
     if (gameScene && gameScene.scene.isActive()) {
-        gameScene.handleResize();
+      gameScene.handleResize();
     }
-}); 
+  });
+} else {
+  // On /home route, hide game container
+  const gameContainer = document.getElementById('game-container');
+  if (gameContainer) {
+    gameContainer.style.display = 'none'; // Hide game container
+  }
+  
+  // Add home-page class to body for styling
+  document.body.classList.add('home-page');
+} 

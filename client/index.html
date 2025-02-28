@@ -1,42 +1,150 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Red Alert Game</title>
+  <title>Red Alert 25</title>
   <style>
+    :root {
+      --soviet-red: #ff0000;
+      --allied-blue: #0000ff;
+      --ore-yellow: #ffff00;
+      --dark-gray: #333333;
+      --light-gray: #808080;
+      --white: #ffffff;
+      --black: #000000;
+    }
+    
     body {
       margin: 0;
       padding: 0;
       overflow: hidden; /* Prevent scrollbars */
-      background: #000;
+      background: var(--dark-gray);
+      font-family: 'Press Start 2P', cursive; /* Retro pixel font */
+      color: var(--white);
     }
+    
     #game-container {
       width: 100vw;
       height: 100vh;
+      border: 8px solid var(--soviet-red);
+      box-sizing: border-box;
+      position: relative;
     }
+    
     #minimap-container {
       position: fixed;
       bottom: 20px;
       right: 20px;
       width: 192px;  /* Based on 128px map * 1.5 scale factor */
       height: 192px;
-      background-color: #333;
-      border: 4px solid #000;
+      background-color: var(--dark-gray);
+      border: 4px solid var(--black);
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
       z-index: 1000;
       display: none; /* Hidden by default, will be shown when game starts */
     }
+    
     #minimap-canvas {
       width: 100%;
       height: 100%;
     }
+    
+    #react-root {
+      width: 100vw;
+      height: 100vh;
+    }
+    
+    /* Game UI elements styling */
+    .game-ui-text {
+      font-family: 'Press Start 2P', cursive;
+      color: var(--white);
+      text-shadow: 2px 2px 0 var(--black);
+      image-rendering: pixelated;
+    }
+    
+    /* Game title overlay */
+    #game-title {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      font-size: 24px;
+      color: var(--soviet-red);
+      text-shadow: 2px 2px 0 var(--black);
+      z-index: 1000;
+    }
+    
+    /* Resource counter styling */
+    #resource-display {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border: 2px solid var(--ore-yellow);
+      z-index: 1000;
+    }
+    
+    /* Control panel */
+    #control-panel {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border: 2px solid var(--allied-blue);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .control-button {
+      font-family: 'Press Start 2P', cursive;
+      background-color: var(--allied-blue);
+      color: var(--white);
+      border: 2px solid var(--black);
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .control-button:hover {
+      background-color: var(--ore-yellow);
+      color: var(--black);
+      transform: scale(1.05);
+    }
+    
+    /* Game overlay frame */
+    #game-frame {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 999;
+      border: 8px solid var(--soviet-red);
+      box-sizing: border-box;
+    }
   </style>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
 <body>
+  <div id="react-root"></div>
   <div id="game-container"></div>
+  <div id="game-frame"></div>
+  <div id="game-title">Red Alert 25</div>
+  <div id="resource-display" class="game-ui-text"></div>
+  <div id="control-panel">
+    <button class="control-button" id="build-button">Build</button>
+    <button class="control-button" id="attack-button">Attack</button>
+    <button class="control-button" id="harvest-button">Harvest</button>
+  </div>
   <div id="minimap-container">
     <canvas id="minimap-canvas"></canvas>
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-  <script type="module" src="/index.js"></script>
+  <script src="/dist/index.js"></script>
+  <script src="/dist/react.js"></script>
 </body>
 </html>
