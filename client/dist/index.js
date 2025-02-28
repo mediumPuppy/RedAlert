@@ -1,5 +1,5 @@
 // Instead of importing 'phaser', we'll use the global Phaser object from the CDN
-import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS } from './game/constants.js';
+import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, FacingDirection, TERRAIN_SPEED_MODIFIERS } from './game/constants.js';
 const socket = io();
 class MainMenu extends Phaser.Scene {
     constructor() {
@@ -131,22 +131,75 @@ class GameScene extends Phaser.Scene {
                     // Emit socket event for multiplayer
                     socket.emit('moveUnit', {
                         id: this.selectedUnit.getData('id'),
-                        x: x * TILE_SIZE + TILE_SIZE / 2,
-                        y: y * TILE_SIZE + TILE_SIZE / 2
+                        x: x,
+                        y: y,
+                        facing: this.selectedUnit.getData('facing'),
+                        duration: 0, // Will be calculated in moveUnit
+                        turnDuration: 0 // Will be calculated in moveUnit
                     });
                 }
             }
         });
-        // Keep your existing socket listeners
+        // Keep your existing socket listeners but update for enhanced movement
         socket.on('unitMoved', (data) => {
             const unit = this.children.getAll().find((obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id);
             if (unit) {
-                this.tweens.add({
-                    targets: unit,
-                    x: data.x,
-                    y: data.y,
-                    duration: 500
-                });
+                const unitType = unit.getData('unitType');
+                const currentX = unit.getData('gridX');
+                const currentY = unit.getData('gridY');
+                // Clear current position
+                if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
+                    this.map[currentX][currentY].setData('occupied', false);
+                }
+                // Handle turning and movement based on unit type
+                if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
+                    this.tweens.add({
+                        targets: unit,
+                        angle: data.facing,
+                        duration: data.turnDuration,
+                        ease: 'Linear',
+                        onComplete: () => {
+                            unit.setData('facing', data.facing);
+                            this.tweens.add({
+                                targets: unit,
+                                x: data.x * TILE_SIZE + TILE_SIZE / 2,
+                                y: data.y * TILE_SIZE + TILE_SIZE / 2,
+                                duration: data.duration,
+                                ease: 'Linear',
+                                onComplete: () => {
+                                    const newX = Math.floor(data.x);
+                                    const newY = Math.floor(data.y);
+                                    unit.setData('gridX', newX);
+                                    unit.setData('gridY', newY);
+                                    if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
+                                        this.map[newX][newY].setData('occupied', true);
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+                else {
+                    // Infantry or no turning needed
+                    unit.setAngle(data.facing);
+                    unit.setData('facing', data.facing);
+                    this.tweens.add({
+                        targets: unit,
+                        x: data.x * TILE_SIZE + TILE_SIZE / 2,
+                        y: data.y * TILE_SIZE + TILE_SIZE / 2,
+                        duration: data.duration,
+                        ease: 'Linear',
+                        onComplete: () => {
+                            const newX = Math.floor(data.x);
+                            const newY = Math.floor(data.y);
+                            unit.setData('gridX', newX);
+                            unit.setData('gridY', newY);
+                            if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
+                                this.map[newX][newY].setData('occupied', true);
+                            }
+                        }
+                    });
+                }
             }
         });
     }
@@ -200,22 +253,105 @@ class GameScene extends Phaser.Scene {
         return building;
     }
     moveUnit(unit, x, y) {
-        // Get current grid position
-        const currentX = Math.floor((unit.x - TILE_SIZE / 2) / TILE_SIZE);
-        const currentY = Math.floor((unit.y - TILE_SIZE / 2) / TILE_SIZE);
+        const unitType = unit.getData('unitType');
+        const currentX = unit.getData('gridX');
+        const currentY = unit.getData('gridY');
+        const targetTile = this.map[x][y];
+        const terrainType = targetTile.getData('type');
+        const terrainModifier = TERRAIN_SPEED_MODIFIERS[terrainType];
+        const baseSpeed = UNIT_STATS[unitType].speed;
+        const turnSpeed = UNIT_STATS[unitType].turnSpeed || 180;
+        // Calculate distance and duration
+        const distance = Phaser.Math.Distance.Between(currentX, currentY, x, y) * TILE_SIZE;
+        const duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        // Calculate new facing direction
+        const targetFacing = this.calculateFacing(currentX, currentY, x, y);
+        const currentFacing = unit.getData('facing');
+        // Calculate turn duration (if needed)
+        const angleDiff = Phaser.Math.Angle.ShortestBetween(currentFacing, targetFacing);
+        const turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
         // Mark current position as unoccupied
-        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
+        if (this.map[currentX] && this.map[currentX][currentY]) {
             this.map[currentX][currentY].setData('occupied', false);
         }
-        // Move the unit
+        // Mark target position as occupied
+        if (this.map[x] && this.map[x][y]) {
+            this.map[x][y].setData('occupied', true);
+        }
+        // Emit move event for multiplayer
+        socket.emit('moveUnit', {
+            id: unit.getData('id'),
+            x: x,
+            y: y,
+            facing: targetFacing,
+            duration: duration,
+            turnDuration: turnDuration
+        });
+        // Turn first (for vehicles), then move
+        if (unitType !== 'INFANTRY' && Math.abs(angleDiff) > 5) {
+            this.tweens.add({
+                targets: unit,
+                angle: targetFacing,
+                duration: turnDuration,
+                ease: 'Linear',
+                onComplete: () => {
+                    unit.setData('facing', targetFacing);
+                    this.performMove(unit, x, y, duration);
+                }
+            });
+        }
+        else {
+            // Infantry turns instantly
+            unit.setAngle(targetFacing);
+            unit.setData('facing', targetFacing);
+            this.performMove(unit, x, y, duration);
+        }
+    }
+    performMove(unit, x, y, duration) {
+        const targetX = x * TILE_SIZE + TILE_SIZE / 2;
+        const targetY = y * TILE_SIZE + TILE_SIZE / 2;
         this.tweens.add({
             targets: unit,
-            x: x * TILE_SIZE + TILE_SIZE / 2,
-            y: y * TILE_SIZE + TILE_SIZE / 2,
-            duration: 500
+            x: targetX,
+            y: targetY,
+            duration: duration,
+            ease: 'Linear', // Linear for constant speed movement
+            onComplete: () => {
+                unit.setData('gridX', x);
+                unit.setData('gridY', y);
+            }
         });
-        // Mark new position as occupied
-        this.map[x][y].setData('occupied', true);
+    }
+    calculateFacing(currentX, currentY, targetX, targetY) {
+        const angle = Phaser.Math.Angle.Between(currentX, currentY, targetX, targetY);
+        const degrees = Phaser.Math.RadToDeg(angle);
+        // Convert to 0-360 range
+        const normalizedDegrees = (degrees + 360) % 360;
+        // Map to 8 cardinal directions
+        if (normalizedDegrees >= 337.5 || normalizedDegrees < 22.5) {
+            return FacingDirection.EAST;
+        }
+        else if (normalizedDegrees >= 22.5 && normalizedDegrees < 67.5) {
+            return FacingDirection.SOUTHEAST;
+        }
+        else if (normalizedDegrees >= 67.5 && normalizedDegrees < 112.5) {
+            return FacingDirection.SOUTH;
+        }
+        else if (normalizedDegrees >= 112.5 && normalizedDegrees < 157.5) {
+            return FacingDirection.SOUTHWEST;
+        }
+        else if (normalizedDegrees >= 157.5 && normalizedDegrees < 202.5) {
+            return FacingDirection.WEST;
+        }
+        else if (normalizedDegrees >= 202.5 && normalizedDegrees < 247.5) {
+            return FacingDirection.NORTHWEST;
+        }
+        else if (normalizedDegrees >= 247.5 && normalizedDegrees < 292.5) {
+            return FacingDirection.NORTH;
+        }
+        else {
+            return FacingDirection.NORTHEAST;
+        }
     }
     handleResize() {
         // Implement the logic to handle resizing the game scene

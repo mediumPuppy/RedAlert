@@ -26,13 +26,23 @@ app.use(express.static(path.join(__dirname, '../client')));
 // Also serve files from the client/dist directory
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
+// Define interface for movement data
+interface MoveUnitData {
+  id: string;
+  x: number;
+  y: number;
+  facing: number;
+  duration: number;
+  turnDuration: number;
+}
+
 // Handle Socket.IO connections
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
-  // Listen for unit movement from a client
-  socket.on('moveUnit', (data: { id: string; x: number; y: number }) => {
-    console.log(`Unit ${data.id} moved to (${data.x}, ${data.y})`);
+  // Listen for unit movement from a client with enhanced data
+  socket.on('moveUnit', (data: MoveUnitData) => {
+    console.log(`Unit ${data.id} moved to (${data.x}, ${data.y}) facing ${data.facing || 'undefined'} (duration: ${data.duration}, turnDuration: ${data.turnDuration})`);
     // Broadcast the movement to all connected clients
     io.emit('unitMoved', data);
   });

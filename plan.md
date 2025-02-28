@@ -343,4 +343,4 @@ Map: Use the original’s map data (from .mix files) to recreate layouts instead
 
 ## problems
 1. fix resizing of the game to not scrunch screen
-2. 
+2. sound turns on only if u turn it off and on before clicking play

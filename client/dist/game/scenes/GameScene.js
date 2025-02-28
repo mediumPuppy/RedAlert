@@ -1,12 +1,11 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, FacingDirection, TERRAIN_SPEED_MODIFIERS } from '../constants';
 export class GameScene extends Scene {
     constructor() {
         super({ key: 'GameScene' });
         this.map = [];
         this.units = [];
-        this.buildings = [];
         this.selectedUnit = null;
         this.resources = 1000;
     }
@@ -31,21 +30,19 @@ export class GameScene extends Scene {
                 this.map[x][y] = tile;
             }
         }
-        this.updateMapPositions();
+        this.updateMapPositions(); // Position tiles initially
     }
     createInitialUnits() {
-        this.units = []; // Clear existing units
         this.units.push(this.createUnit('TANK', 2, 2));
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
-        this.updateUnitPositions();
     }
     createUI() {
         this.resourceText = this.add.text(0, 0, `Resources: ${this.resources}`, {
             fontSize: '16px',
             color: '#ffffff'
         }).setDepth(1);
-        this.updateUIPositions();
+        this.updateUIPositions(); // Position UI initially
     }
     setupInput() {
         this.input.on('gameobjectdown', (pointer, gameObject) => {
@@ -78,14 +75,16 @@ export class GameScene extends Scene {
         });
     }
     update() {
-        // Remove destroyed units from our tracking array
-        this.units = this.units.filter(unit => unit.active);
+        this.units = this.units.filter(unit => {
+            const health = unit.getData('health');
+            return health !== undefined && health > 0;
+        });
     }
     getScaleFactor() {
         return this.scale.width / GAME_WIDTH;
     }
     createUnit(type, gridX, gridY) {
-        const size = type === 'INFANTRY' ? TILE_SIZE / 2 : TILE_SIZE * 0.8;
+        const size = type === 'INFANTRY' ? TILE_SIZE / 2 : TILE_SIZE;
         const unit = this.add.rectangle(0, 0, size, size, COLORS[type]);
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
@@ -95,8 +94,12 @@ export class GameScene extends Scene {
         unit.setData('range', UNIT_STATS[type].range || 1);
         unit.setData('gridX', gridX);
         unit.setData('gridY', gridY);
+        unit.setData('facing', FacingDirection.NORTH); // Initial facing direction
+        unit.setAngle(FacingDirection.NORTH); // Explicitly set initial angle to match facing
+        unit.setData('id', Date.now().toString()); // Unique ID for multiplayer
         unit.setInteractive();
-        this.updateUnitPosition(unit);
+        this.units.push(unit); // Explicitly track the unit
+        this.updateUnitPosition(unit); // Position unit initially
         return unit;
     }
     updateMapPositions() {
@@ -111,25 +114,18 @@ export class GameScene extends Scene {
     }
     updateUnitPositions() {
         this.units.forEach(unit => this.updateUnitPosition(unit));
-        this.buildings.forEach(building => this.updateBuildingPosition(building));
     }
     updateUnitPosition(unit) {
-        if (!unit.active)
-            return;
         const scaleFactor = this.getScaleFactor();
         const gridX = unit.getData('gridX');
         const gridY = unit.getData('gridY');
         unit.setPosition((gridX * TILE_SIZE + TILE_SIZE / 2) * scaleFactor, (gridY * TILE_SIZE + TILE_SIZE / 2) * scaleFactor);
         unit.setScale(scaleFactor);
-    }
-    updateBuildingPosition(building) {
-        if (!building.active)
-            return;
-        const scaleFactor = this.getScaleFactor();
-        const gridX = building.getData('gridX');
-        const gridY = building.getData('gridY');
-        building.setPosition((gridX * TILE_SIZE + TILE_SIZE / 2) * scaleFactor, (gridY * TILE_SIZE + TILE_SIZE / 2) * scaleFactor);
-        building.setScale(scaleFactor);
+        // Apply rotation based on facing direction
+        const facing = unit.getData('facing');
+        if (facing !== undefined) {
+            unit.setAngle(facing);
+        }
     }
     updateUIPositions() {
         const scaleFactor = this.getScaleFactor();
@@ -147,28 +143,116 @@ export class GameScene extends Scene {
         if (this.map[x][y].getData('type') === 'WATER')
             return false;
         // Check if position is occupied by another unit
-        const occupied = this.units.some(unit => unit.active &&
-            unit.getData('gridX') === x &&
+        const occupied = this.units.some(unit => unit.getData('gridX') === x &&
             unit.getData('gridY') === y &&
             unit !== this.selectedUnit);
         return !occupied;
     }
+    calculateFacing(currentX, currentY, targetX, targetY) {
+        const angle = Phaser.Math.Angle.Between(currentX, currentY, targetX, targetY);
+        const degrees = Phaser.Math.RadToDeg(angle);
+        // Convert to 0-360 range
+        const normalizedDegrees = (degrees + 360) % 360;
+        // Map to 8 cardinal directions
+        if (normalizedDegrees >= 337.5 || normalizedDegrees < 22.5) {
+            return FacingDirection.EAST;
+        }
+        else if (normalizedDegrees >= 22.5 && normalizedDegrees < 67.5) {
+            return FacingDirection.SOUTHEAST;
+        }
+        else if (normalizedDegrees >= 67.5 && normalizedDegrees < 112.5) {
+            return FacingDirection.SOUTH;
+        }
+        else if (normalizedDegrees >= 112.5 && normalizedDegrees < 157.5) {
+            return FacingDirection.SOUTHWEST;
+        }
+        else if (normalizedDegrees >= 157.5 && normalizedDegrees < 202.5) {
+            return FacingDirection.WEST;
+        }
+        else if (normalizedDegrees >= 202.5 && normalizedDegrees < 247.5) {
+            return FacingDirection.NORTHWEST;
+        }
+        else if (normalizedDegrees >= 247.5 && normalizedDegrees < 292.5) {
+            return FacingDirection.NORTH;
+        }
+        else {
+            return FacingDirection.NORTHEAST;
+        }
+    }
     moveUnit(unit, x, y) {
         const unitType = unit.getData('unitType');
-        const speed = UNIT_STATS[unitType].speed;
+        const currentX = unit.getData('gridX');
+        const currentY = unit.getData('gridY');
+        const targetTile = this.map[x][y];
+        const terrainType = targetTile.getData('type');
+        const terrainModifier = TERRAIN_SPEED_MODIFIERS[terrainType];
+        const baseSpeed = UNIT_STATS[unitType].speed;
+        const turnSpeed = UNIT_STATS[unitType].turnSpeed || 180;
+        // Calculate distance and duration
+        const distance = Phaser.Math.Distance.Between(currentX, currentY, x, y) * TILE_SIZE;
+        const duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        // Calculate new facing direction
+        const targetFacing = this.calculateFacing(currentX, currentY, x, y);
+        const currentFacing = unit.getData('facing');
+        // Calculate turn duration (if needed)
+        const angleDiff = Phaser.Math.Angle.ShortestBetween(currentFacing, targetFacing);
+        const turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
+        // Only unset occupied if current position is valid
+        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
+            this.map[currentX][currentY].setData('occupied', false);
+        }
+        // Only set occupied if target is valid and not already occupied by another unit
+        if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+            const alreadyOccupied = this.units.some(u => u !== unit && u.getData('gridX') === x && u.getData('gridY') === y);
+            if (!alreadyOccupied) {
+                this.map[x][y].setData('occupied', true);
+            }
+        }
+        // Emit move event for multiplayer
+        if (typeof socket !== 'undefined') {
+            socket.emit('moveUnit', {
+                id: unit.getData('id'),
+                x: x,
+                y: y,
+                facing: targetFacing,
+                duration: duration,
+                turnDuration: turnDuration
+            });
+        }
+        // Turn first (for vehicles), then move
+        if (unitType !== 'INFANTRY' && Math.abs(angleDiff) > 5) {
+            this.tweens.add({
+                targets: unit,
+                angle: targetFacing,
+                duration: turnDuration,
+                ease: 'Linear',
+                onComplete: () => {
+                    unit.setData('facing', targetFacing);
+                    this.performMove(unit, x, y, duration);
+                }
+            });
+        }
+        else {
+            // Infantry turns instantly
+            unit.setAngle(targetFacing);
+            unit.setData('facing', targetFacing);
+            this.performMove(unit, x, y, duration);
+        }
+    }
+    performMove(unit, x, y, duration) {
         const scaleFactor = this.getScaleFactor();
-        // Update grid position immediately
-        unit.setData('gridX', x);
-        unit.setData('gridY', y);
-        // Calculate scaled position
         const targetX = (x * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
         const targetY = (y * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
         this.tweens.add({
             targets: unit,
             x: targetX,
             y: targetY,
-            duration: speed * 10,
-            ease: 'Linear'
+            duration: duration,
+            ease: 'Linear', // Linear for constant speed movement
+            onComplete: () => {
+                unit.setData('gridX', x);
+                unit.setData('gridY', y);
+            }
         });
     }
     attack(attacker, target) {
@@ -184,20 +268,16 @@ export class GameScene extends Scene {
             targetHealth -= damage;
             target.setData('health', targetHealth);
             if (targetHealth <= 0) {
-                const index = this.units.indexOf(target);
-                if (index > -1) {
-                    this.units.splice(index, 1);
-                }
                 target.destroy();
             }
             // Visual feedback
             const originalColor = target.fillColor;
             target.setFillStyle(0xff0000);
-            this.time.delayedCall(100, () => {
-                if (target.active) {
-                    target.setFillStyle(originalColor);
-                }
-            });
+            this.time.delayedCall(100, () => target.setFillStyle(originalColor));
+            // Face the target when attacking
+            const targetFacing = this.calculateFacing(attackerX, attackerY, targetX, targetY);
+            attacker.setAngle(targetFacing);
+            attacker.setData('facing', targetFacing);
         }
     }
     harvest(harvester, oreTile) {

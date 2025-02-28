@@ -8,6 +8,18 @@ export type UnitType = 'TANK' | 'INFANTRY' | 'HARVESTER';
 export type BuildingType = 'BASE' | 'BARRACKS';
 export type ColorType = TileType | UnitType | BuildingType | 'EXPLOSION';
 
+// Add 8 cardinal directions (in degrees)
+export enum FacingDirection {
+    NORTH = 0,
+    NORTHEAST = 45,
+    EAST = 90,
+    SOUTHEAST = 135,
+    SOUTH = 180,
+    SOUTHWEST = 225,
+    WEST = 270,
+    NORTHWEST = 315
+}
+
 export const COLORS: Record<ColorType, number> = {
     GRASS: 0x00ff00,
     WATER: 0x0000ff,
@@ -26,6 +38,7 @@ interface UnitStats {
     range?: number;
     speed: number;
     capacity?: number;
+    turnSpeed?: number; // Degrees per second for vehicles
 }
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {
@@ -33,17 +46,27 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
         health: 100,
         damage: 20,
         range: 3,
-        speed: 100
+        speed: 100, // Faster than infantry
+        turnSpeed: 90 // 90 degrees/sec (vehicles turn slower)
     },
     INFANTRY: {
         health: 50,
         damage: 10,
         range: 2,
-        speed: 80
+        speed: 80, // Slower than tank
+        turnSpeed: 180 // Faster turning (infantry pivots quickly)
     },
     HARVESTER: {
         health: 75,
         speed: 60,
-        capacity: 100
+        capacity: 100,
+        turnSpeed: 60 // Slower turning than tank
     }
+};
+
+// Terrain speed modifiers (multiplier to base speed)
+export const TERRAIN_SPEED_MODIFIERS: Record<TileType, number> = {
+    GRASS: 1.0,  // Normal speed
+    WATER: 0.0,  // Impassable (handled in isValidMove)
+    ORE: 0.7     // Slower on ore
 }; 
