@@ -5,11 +5,10 @@
 
 ## client/game/constants.ts
 ```
+export const TILE_SIZE = 32; // Classic size from original game
 export const GRID_SIZE = 20;
-// We'll calculate TILE_SIZE dynamically in GameScene based on screen size
-// GAME_WIDTH and GAME_HEIGHT will be set to window dimensions in the Phaser config
-export const GAME_WIDTH = window.innerWidth;
-export const GAME_HEIGHT = window.innerHeight;
+export const GAME_WIDTH = TILE_SIZE * GRID_SIZE; // 640px
+export const GAME_HEIGHT = TILE_SIZE * GRID_SIZE; // 640px
 
 export type TileType = 'GRASS' | 'WATER' | 'ORE';
 export type UnitType = 'TANK' | 'INFANTRY' | 'HARVESTER';
@@ -54,14 +53,15 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
         speed: 60,
         capacity: 100
     }
-}; ```
+};
+```
 
 
 ## client/game/scenes/GameScene.ts
 ```
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType } from '../constants';
 
 export class GameScene extends Scene {
     private map: Phaser.GameObjects.Rectangle[][] = [];
@@ -69,18 +69,12 @@ export class GameScene extends Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
-    private tileSize: number; // Dynamic tile size
 
     constructor() {
         super({ key: 'GameScene' });
-        // Calculate tile size based on smaller dimension to maintain square grid
-        this.tileSize = Math.floor(Math.min(window.innerWidth, window.innerHeight) / GRID_SIZE);
     }
 
     create() {
-        // Recalculate tileSize in case window was resized
-        this.tileSize = Math.floor(Math.min(this.scale.width, this.scale.height) / GRID_SIZE);
-        
         // Create 20x20 grid map
         for (let x = 0; x < GRID_SIZE; x++) {
             this.map[x] = [];
@@ -89,10 +83,10 @@ export class GameScene extends Scene {
                                Math.random() < 0.15 ? 'ORE' : 'GRASS';
                 
                 const tile = this.add.rectangle(
-                    x * this.tileSize + this.tileSize/2,
-                    y * this.tileSize + this.tileSize/2,
-                    this.tileSize,
-                    this.tileSize,
+                    x * TILE_SIZE + TILE_SIZE/2,
+                    y * TILE_SIZE + TILE_SIZE/2,
+                    TILE_SIZE,
+                    TILE_SIZE,
                     COLORS[tileType]
                 );
                 tile.setStrokeStyle(1, 0x000000);
@@ -109,11 +103,11 @@ export class GameScene extends Scene {
         this.units.push(this.createUnit('INFANTRY', 3, 3));
         this.units.push(this.createUnit('HARVESTER', 4, 4));
 
-        // Resource display - scale font size based on tile size
+        // Resource display
         this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
-            fontSize: `${Math.max(16, this.tileSize / 2)}px`,
+            fontSize: '16px',
             color: '#ffffff'
-        });
+        }).setDepth(1); // Ensure visibility
 
         // Handle unit selection
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
@@ -137,8 +131,8 @@ export class GameScene extends Scene {
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (!this.selectedUnit) return;
 
-            const x = Math.floor(pointer.x / this.tileSize);
-            const y = Math.floor(pointer.y / this.tileSize);
+            const x = Math.floor(pointer.x / TILE_SIZE);
+            const y = Math.floor(pointer.y / TILE_SIZE);
 
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
@@ -160,10 +154,10 @@ export class GameScene extends Scene {
     }
 
     private createUnit(type: UnitType, gridX: number, gridY: number) {
-        const size = type === 'INFANTRY' ? this.tileSize/2 : this.tileSize;
+        const size = type === 'INFANTRY' ? TILE_SIZE/2 : TILE_SIZE;
         const unit = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
             size,
             size,
             COLORS[type]
@@ -202,8 +196,8 @@ export class GameScene extends Scene {
         
         this.tweens.add({
             targets: unit,
-            x: x * this.tileSize + this.tileSize/2,
-            y: y * this.tileSize + this.tileSize/2,
+            x: x * TILE_SIZE + TILE_SIZE/2,
+            y: y * TILE_SIZE + TILE_SIZE/2,
             duration: speed * 10,
             ease: 'Linear',
             onComplete: () => {
@@ -248,7 +242,8 @@ export class GameScene extends Scene {
         oreTile.setFillStyle(0xffffff);
         this.time.delayedCall(200, () => oreTile.setFillStyle(originalColor));
     }
-}```
+}
+```
 
 
 ## client/index.html
@@ -276,13 +271,14 @@ export class GameScene extends Scene {
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
   <script type="module" src="/index.js"></script>
 </body>
-</html>```
+</html>
+```
 
 
 ## client/index.ts
 ```
 // Instead of importing 'phaser', we'll use the global Phaser object from the CDN
-import { GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType } from './game/constants.js';
+import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType } from './game/constants.js';
 
 // Use the global io object from socket.io CDN
 declare const io: any;
@@ -385,12 +381,9 @@ class GameScene extends Phaser.Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
-    private tileSize: number; // Dynamic tile size
 
     constructor() {
         super('GameScene');
-        // Calculate tile size based on smaller dimension
-        this.tileSize = Math.floor(Math.min(window.innerWidth, window.innerHeight) / GRID_SIZE);
     }
 
     preload() {
@@ -401,9 +394,6 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        // Recalculate tileSize in case window was resized
-        this.tileSize = Math.floor(Math.min(this.scale.width, this.scale.height) / GRID_SIZE);
-        
         console.log('GameScene create started');
         // Create grid-based map with our new implementation
         for (let x = 0; x < GRID_SIZE; x++) {
@@ -413,10 +403,10 @@ class GameScene extends Phaser.Scene {
                                Math.random() < 0.1 ? 'ORE' : 'GRASS';
                 
                 const tile = this.add.rectangle(
-                    x * this.tileSize + this.tileSize/2,
-                    y * this.tileSize + this.tileSize/2,
-                    this.tileSize,
-                    this.tileSize,
+                    x * TILE_SIZE + TILE_SIZE/2,
+                    y * TILE_SIZE + TILE_SIZE/2,
+                    TILE_SIZE,
+                    TILE_SIZE,
                     COLORS[tileType]
                 );
                 tile.setStrokeStyle(1, 0x000000);
@@ -435,7 +425,7 @@ class GameScene extends Phaser.Scene {
         this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
             fontSize: '20px',
             color: '#ffffff'
-        });
+        }).setDepth(1);
 
         // Combine both click handlers
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
@@ -453,16 +443,16 @@ class GameScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (this.selectedUnit) {
-                const x = Math.floor(pointer.x / this.tileSize);
-                const y = Math.floor(pointer.y / this.tileSize);
+                const x = Math.floor(pointer.x / TILE_SIZE);
+                const y = Math.floor(pointer.y / TILE_SIZE);
                 
                 if (this.isValidMove(x, y)) {
                     this.moveUnit(this.selectedUnit, x, y);
                     // Emit socket event for multiplayer
                     socket.emit('moveUnit', { 
                         id: this.selectedUnit.getData('id'), 
-                        x: x * this.tileSize + this.tileSize/2, 
-                        y: y * this.tileSize + this.tileSize/2 
+                        x: x * TILE_SIZE + TILE_SIZE/2, 
+                        y: y * TILE_SIZE + TILE_SIZE/2 
                     });
                 }
             }
@@ -508,10 +498,10 @@ class GameScene extends Phaser.Scene {
 
     private createUnit(type: UnitType, gridX: number, gridY: number) {
         const unit = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
-            this.tileSize * 0.8,
-            this.tileSize * 0.8,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
+            TILE_SIZE * 0.8,
+            TILE_SIZE * 0.8,
             COLORS[type]
         );
         
@@ -540,10 +530,10 @@ class GameScene extends Phaser.Scene {
 
     private createBuilding(type: BuildingType, gridX: number, gridY: number) {
         const building = this.add.rectangle(
-            gridX * this.tileSize + this.tileSize/2,
-            gridY * this.tileSize + this.tileSize/2,
-            this.tileSize * 1.2,
-            this.tileSize * 1.2,
+            gridX * TILE_SIZE + TILE_SIZE/2,
+            gridY * TILE_SIZE + TILE_SIZE/2,
+            TILE_SIZE * 1.2,
+            TILE_SIZE * 1.2,
             COLORS[type]
         );
         
@@ -562,8 +552,8 @@ class GameScene extends Phaser.Scene {
 
     private moveUnit(unit: Phaser.GameObjects.Rectangle, x: number, y: number) {
         // Get current grid position
-        const currentX = Math.floor((unit.x - this.tileSize/2) / this.tileSize);
-        const currentY = Math.floor((unit.y - this.tileSize/2) / this.tileSize);
+        const currentX = Math.floor((unit.x - TILE_SIZE/2) / TILE_SIZE);
+        const currentY = Math.floor((unit.y - TILE_SIZE/2) / TILE_SIZE);
         
         // Mark current position as unoccupied
         if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
@@ -573,8 +563,8 @@ class GameScene extends Phaser.Scene {
         // Move the unit
         this.tweens.add({
             targets: unit,
-            x: x * this.tileSize + this.tileSize/2,
-            y: y * this.tileSize + this.tileSize/2,
+            x: x * TILE_SIZE + TILE_SIZE/2,
+            y: y * TILE_SIZE + TILE_SIZE/2,
             duration: 500
         });
         
@@ -585,12 +575,13 @@ class GameScene extends Phaser.Scene {
 
 const config = {
     type: Phaser.AUTO,
-    width: window.innerWidth,  // Full width
-    height: window.innerHeight, // Full height
+    width: GAME_WIDTH,  // 640px
+    height: GAME_HEIGHT, // 640px
     scale: {
-        mode: Phaser.Scale.FIT, // Scales game to fit while maintaining aspect ratio
-        autoCenter: Phaser.Scale.CENTER_BOTH, // Centers game on screen
-        parent: 'game-container'
+        mode: Phaser.Scale.FIT, // Scale while maintaining aspect ratio
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        parent: 'game-container',
+        expandParent: true
     },
     backgroundColor: '#333333',
     scene: [MainMenu, GameScene],
@@ -608,7 +599,8 @@ const game = new Phaser.Game(config);
 // Handle window resize
 window.addEventListener('resize', () => {
     game.scale.resize(window.innerWidth, window.innerHeight);
-}); ```
+});
+```
 
 
 ## client/package.json
@@ -658,7 +650,8 @@ window.addEventListener('resize', () => {
   },
   "include": ["./**/*"],
   "exclude": ["node_modules", "dist"]
-} ```
+}
+```
 
 
 ## server/package.json
@@ -742,7 +735,8 @@ io.on('connection', (socket) => {
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); ```
+});
+```
 
 
 ## server/tsconfig.json
@@ -761,5 +755,6 @@ server.listen(PORT, () => {
   },
   "include": ["./**/*"],
   "exclude": ["node_modules"]
-} ```
+}
+```
 

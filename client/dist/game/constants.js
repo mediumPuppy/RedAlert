@@ -1,8 +1,7 @@
+export const TILE_SIZE = 32; // Classic size from original game
 export const GRID_SIZE = 20;
-// We'll calculate TILE_SIZE dynamically in GameScene based on screen size
-// GAME_WIDTH and GAME_HEIGHT will be set to window dimensions in the Phaser config
-export const GAME_WIDTH = window.innerWidth;
-export const GAME_HEIGHT = window.innerHeight;
+export const GAME_WIDTH = TILE_SIZE * GRID_SIZE; // 640px
+export const GAME_HEIGHT = TILE_SIZE * GRID_SIZE; // 640px
 export const COLORS = {
     GRASS: 0x00ff00,
     WATER: 0x0000ff,
