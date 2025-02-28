@@ -18,6 +18,7 @@ const socket = io();
 class MainMenu extends Phaser.Scene {
     private soundOn: boolean = true;
     private bgm!: Phaser.Sound.BaseSound;
+    private findingGameText!: Phaser.GameObjects.Text;
 
     constructor() {
         super('MainMenu');
@@ -49,7 +50,7 @@ class MainMenu extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Play button with visible styling
-        const playButton = this.add.text(centerX, centerY, 'Play', {
+        const playButton = this.add.text(centerX, centerY, 'Play Multiplayer', {
             fontSize: '32px',
             color: '#ffffff',
             backgroundColor: '#006400',
@@ -63,9 +64,18 @@ class MainMenu extends Phaser.Scene {
         playButton.on('pointerover', () => playButton.setStyle({ backgroundColor: '#008000' }));
         playButton.on('pointerout', () => playButton.setStyle({ backgroundColor: '#006400' }));
         playButton.on('pointerdown', () => {
-            console.log('Play button clicked');
-            // Navigate to the /play route instead of starting the scene directly
-            window.location.href = '/play';
+            console.log('Joining matchmaking');
+            socket.emit('joinMatchmaking');
+            playButton.setVisible(false);
+            
+            // Show finding game text
+            this.findingGameText = this.add.text(centerX, centerY, 'Finding Players...', {
+                fontSize: '24px',
+                color: '#ffffff',
+                backgroundColor: '#000066',
+                padding: { x: 20, y: 10 },
+                fontFamily: '"Press Start 2P", cursive'
+            }).setOrigin(0.5);
         });
 
         // Sound button
@@ -100,6 +110,16 @@ class MainMenu extends Phaser.Scene {
                 }
             }
         });
+
+        // Listen for matchmaking events
+        socket.on('matchmakingStarted', () => {
+            console.log('Matchmaking started');
+        });
+
+        socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
+            console.log(`Game created: ${gameId} with ${players.length} players`);
+            this.scene.start('GameScene', { gameId });
+        });
     }
 }
 
@@ -118,9 +138,17 @@ class GameScene extends Phaser.Scene {
     private attackButton: HTMLElement | null = null;
     private harvestButton: HTMLElement | null = null;
     private currentMode: 'normal' | 'build' | 'attack' | 'harvest' = 'normal';
+    private gameId: string | null = null;
+    private inLobby: boolean = true;
 
     constructor() {
         super('GameScene');
+    }
+
+    init(data: { gameId?: string }) {
+        if (data.gameId) {
+            this.gameId = data.gameId;
+        }
     }
 
     preload() {
@@ -132,34 +160,243 @@ class GameScene extends Phaser.Scene {
 
     create() {
         console.log('GameScene create started');
-        
-        // Create grid-based map with our new implementation
-        for (let x = 0; x < MAP_SIZE; x++) {
-            this.map[x] = [];
-            for (let y = 0; y < MAP_SIZE; y++) {
-                const tileType: TileType = Math.random() < 0.1 ? 'WATER' : 
-                               Math.random() < 0.1 ? 'ORE' : 'GRASS';
-                
-                const tile = this.add.rectangle(
-                    x * TILE_SIZE + TILE_SIZE/2,
-                    y * TILE_SIZE + TILE_SIZE/2,
-                    TILE_SIZE,
-                    TILE_SIZE,
-                    COLORS[tileType]
-                );
-                tile.setStrokeStyle(1, 0x000000);
-                tile.setData('type', tileType);
-                this.map[x][y] = tile;
-            }
+        this.inLobby = true;
+
+        // Add background color to make sure we can see the scene
+        this.cameras.main.setBackgroundColor('#222222');
+
+        const centerX = this.cameras.main.width / 2;
+        const centerY = this.cameras.main.height / 2;
+
+        // Show waiting message if we're in a game
+        if (this.gameId) {
+            this.add.text(centerX, centerY - 50, 'Waiting for Players...', {
+                fontSize: '24px',
+                color: '#ffffff',
+                fontFamily: '"Press Start 2P", cursive',
+                backgroundColor: '#000066',
+                padding: { x: 20, y: 10 }
+            }).setOrigin(0.5);
+
+            this.add.text(centerX, centerY, `Game ID: ${this.gameId}`, {
+                fontSize: '16px',
+                color: '#ffffff',
+                fontFamily: '"Press Start 2P", cursive'
+            }).setOrigin(0.5);
+        } else {
+            // If no gameId, show error and return to main menu
+            this.add.text(centerX, centerY, 'Error: No game found', {
+                fontSize: '24px',
+                color: '#ffffff',
+                fontFamily: '"Press Start 2P", cursive',
+                backgroundColor: '#ff0000',
+                padding: { x: 20, y: 10 }
+            }).setOrigin(0.5);
+
+            // Add button to return to main menu
+            const returnButton = this.add.text(centerX, centerY + 100, 'Return to Menu', {
+                fontSize: '20px',
+                color: '#ffffff',
+                backgroundColor: '#006400',
+                padding: { x: 20, y: 10 },
+                fontFamily: '"Press Start 2P", cursive'
+            })
+            .setOrigin(0.5)
+            .setInteractive({ useHandCursor: true });
+
+            returnButton.on('pointerdown', () => {
+                this.scene.start('MainMenu');
+            });
+
+            return;
         }
 
-        // Add units and buildings from our new implementation
-        this.createUnit('TANK', 2, 2);
-        this.createUnit('INFANTRY', 3, 2);
-        this.createUnit('HARVESTER', 4, 2);
-        this.createBuilding('BASE', 1, 1);
+        // Set up socket event listeners for the lobby and game
+        socket.on('lobbyUpdate', ({ players }: { players: { id: string, team: string | null, ready: boolean }[] }) => {
+            this.showLobbyUI(players);
+        });
 
-        // Get the resource display element
+        socket.on('gameStart', (data: { 
+            gameId: string, 
+            players: { id: string, team: string | null, ready: boolean }[], 
+            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
+        }) => {
+            this.inLobby = false;
+            this.startGame(data);
+        });
+
+        // Handle unit movement from other players
+        socket.on('unitMoved', (data: UnitMovedData) => {
+            if (!this.inLobby) {
+                this.handleRemoteUnitMovement(data);
+            }
+        });
+    }
+
+    private showLobbyUI(players: { id: string, team: string | null, ready: boolean }[]) {
+        if (!this.inLobby) return;
+        
+        // Clear existing UI
+        this.children.removeAll();
+
+        const centerX = this.cameras.main.width / 2;
+        const centerY = this.cameras.main.height / 2;
+
+        // Add game title
+        this.add.text(centerX, 50, 'Red Alert 25 - Game Lobby', {
+            fontSize: '24px',
+            color: '#ffffff',
+            fontFamily: '"Press Start 2P", cursive',
+            backgroundColor: '#ff0000',
+            padding: { x: 20, y: 10 }
+        }).setOrigin(0.5);
+
+        // Add game ID
+        this.add.text(centerX, 100, `Game ID: ${this.gameId}`, {
+            fontSize: '16px',
+            color: '#ffffff',
+            fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5);
+
+        // Add player list title
+        this.add.text(centerX, 150, 'Players:', {
+            fontSize: '20px',
+            color: '#ffffff',
+            fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5);
+
+        // Add player list
+        players.forEach((player, i) => {
+            const isCurrentPlayer = player.id === socket.id;
+            const playerText = this.add.text(
+                centerX, 
+                190 + i * 30, 
+                `${isCurrentPlayer ? '→ ' : ''}${player.id.substring(0, 6)} - ${player.team || 'No Team'} ${player.ready ? '(Ready)' : ''}`, 
+                {
+                    fontSize: '16px',
+                    color: isCurrentPlayer ? '#ffff00' : '#ffffff',
+                    fontFamily: '"Press Start 2P", cursive'
+                }
+            ).setOrigin(0.5);
+        });
+
+        // Add team selection buttons
+        const alliesButton = this.add.text(centerX - 100, centerY + 100, 'Join Allies', {
+            fontSize: '16px',
+            color: '#ffffff',
+            backgroundColor: '#0000ff',
+            padding: { x: 10, y: 5 },
+            fontFamily: '"Press Start 2P", cursive'
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+        const sovietsButton = this.add.text(centerX + 100, centerY + 100, 'Join Soviets', {
+            fontSize: '16px',
+            color: '#ffffff',
+            backgroundColor: '#ff0000',
+            padding: { x: 10, y: 5 },
+            fontFamily: '"Press Start 2P", cursive'
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+        // Add ready button
+        const readyButton = this.add.text(centerX, centerY + 150, 'Ready', {
+            fontSize: '20px',
+            color: '#ffffff',
+            backgroundColor: '#006400',
+            padding: { x: 20, y: 10 },
+            fontFamily: '"Press Start 2P", cursive'
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+        // Add button event handlers
+        alliesButton.on('pointerdown', () => {
+            if (this.gameId) {
+                socket.emit('setTeam', { gameId: this.gameId, team: 'ALLIES' });
+            }
+        });
+
+        sovietsButton.on('pointerdown', () => {
+            if (this.gameId) {
+                socket.emit('setTeam', { gameId: this.gameId, team: 'SOVIETS' });
+            }
+        });
+
+        readyButton.on('pointerdown', () => {
+            if (this.gameId) {
+                socket.emit('setReady', this.gameId);
+                readyButton.setStyle({ backgroundColor: '#004400' });
+                readyButton.setText('Waiting...');
+                readyButton.disableInteractive();
+            }
+        });
+    }
+
+    private startGame(data: { 
+        gameId: string, 
+        players: { id: string, team: string | null, ready: boolean }[], 
+        units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
+    }) {
+        // Clear the lobby UI
+        this.children.removeAll();
+        
+        // Create the game map
+        this.createMap();
+        
+        // Create units from server data
+        Object.entries(data.units).forEach(([id, unitData]) => {
+            const unit = this.add.rectangle(
+                unitData.x * TILE_SIZE + TILE_SIZE/2,
+                unitData.y * TILE_SIZE + TILE_SIZE/2,
+                unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
+                unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
+                COLORS[unitData.type as UnitType]
+            );
+            
+            unit.setStrokeStyle(1, 0x000000);
+            unit.setInteractive();
+            unit.setData('type', 'UNIT');
+            unit.setData('unitType', unitData.type);
+            unit.setData('id', id);
+            unit.setData('originalColor', COLORS[unitData.type as UnitType]);
+            unit.setData('facing', unitData.facing);
+            unit.setAngle(unitData.facing);
+            unit.setData('gridX', unitData.x);
+            unit.setData('gridY', unitData.y);
+            unit.setData('owner', unitData.owner);
+            
+            // Only allow selection of units owned by this player
+            if (unitData.owner === socket.id) {
+                unit.setData('selectable', true);
+            }
+            
+            const stats = UNIT_STATS[unitData.type as UnitType];
+            unit.setData('health', stats.health);
+            unit.setData('damage', stats.damage || 0);
+            unit.setData('range', stats.range || 1);
+            unit.setData('speed', stats.speed);
+            
+            if (unitData.type === 'HARVESTER') {
+                unit.setData('capacity', stats.capacity || 100);
+            }
+            
+            this.units.push(unit);
+            
+            // Mark the tile as occupied
+            if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                this.map[unitData.x][unitData.y].setData('occupied', true);
+            }
+        });
+        
+        // Set up the game UI
+        this.setupHtmlMinimap();
+        this.updateMinimap();
+        
+        // Set up resource display
         this.resourceDisplay = document.getElementById('resource-display');
         if (this.resourceDisplay) {
             this.updateResourceDisplay();
@@ -170,10 +407,10 @@ class GameScene extends Phaser.Scene {
                 color: '#ffffff'
             }).setDepth(1);
         }
-
+        
         // Set up control panel
         this.setupControlPanel();
-
+        
         // Set up camera for large map
         this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
         this.cameras.main.setViewport(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -181,183 +418,102 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
         this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
         
-        // Set up HTML minimap
-        this.setupHtmlMinimap();
-        this.updateMinimap();
+        // Set up input handlers
+        this.setupInput();
+    }
+
+    private handleRemoteUnitMovement(data: UnitMovedData) {
+        // Find the unit by ID
+        const unit = this.units.find(u => u.getData('id') === data.id);
         
-        // Set up cleanup when scene stops
-        this.events.on('shutdown', this.cleanupUI, this);
-
-        // Combine both click handlers
-        this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
-            if (gameObject.getData('type') === 'UNIT') {
-                if (this.selectedUnit) {
-                    this.selectedUnit.setStrokeStyle(1, 0x000000);
-                }
-                this.selectedUnit = gameObject;
-                gameObject.setStrokeStyle(2, 0xffff00);
-                
-                // Emit socket event for multiplayer
-                socket.emit('selectUnit', { id: gameObject.getData('id') });
-                
-                // Enable/disable buttons based on unit type
-                this.updateControlButtons();
-            }
-        });
-
-        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-            // We're now handling minimap clicks in HTML, so this is only for regular map clicks
-            if (this.selectedUnit) {
-                // Account for camera position when calculating grid coordinates
-                const x = Math.floor((pointer.x + this.cameras.main.scrollX) / TILE_SIZE);
-                const y = Math.floor((pointer.y + this.cameras.main.scrollY) / TILE_SIZE);
-                
-                if (this.currentMode === 'normal' && this.isValidMove(x, y)) {
-                    this.moveUnit(this.selectedUnit, x, y);
-                } else if (this.currentMode === 'attack') {
-                    this.attackLocation(this.selectedUnit, x, y);
-                } else if (this.currentMode === 'harvest' && this.selectedUnit.getData('unitType') === 'HARVESTER') {
-                    this.harvestLocation(this.selectedUnit, x, y);
-                } else if (this.currentMode === 'build') {
-                    this.buildStructure(x, y);
-                }
-                
-                // Reset mode after action
-                this.setMode('normal');
-            }
-        });
-
-        // Keep your existing socket listeners but update for enhanced movement
-        socket.on('unitMoved', (data: UnitMovedData) => {
-            console.log(`Received unitMoved event for ID: ${data.id}`);
+        if (unit) {
+            const unitType = unit.getData('unitType') as UnitType;
+            const currentX = unit.getData('gridX');
+            const currentY = unit.getData('gridY');
             
-            // Debug: list all unit IDs in the scene
-            console.log(`Available units: ${this.units.length}`);
-            this.units.forEach((u: any) => {
-                console.log(`- Unit: ${u.getData('unitType')} with ID: ${u.getData('id')} and color: ${u.fillColor.toString(16)}`);
-            });
-            
-            // First try to find the unit in our tracked units array
-            let unit = this.units.find(u => u.getData('id') === data.id);
-            
-            // If not found, fall back to searching all game objects
-            if (!unit) {
-                unit = this.children.getAll().find(
-                    (obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id
-                ) as Phaser.GameObjects.Rectangle | undefined;
-                
-                if (unit) {
-                    // If found in children but not in units array, add it to the array for future lookups
-                    this.units.push(unit as Phaser.GameObjects.Rectangle);
-                    console.log(`Added previously untracked unit ${data.id} to units array`);
-                }
+            // Skip processing if duration is zero or negative
+            if (data.duration <= 0) {
+                console.log(`Skipping instant movement for unit ${data.id} (duration: ${data.duration})`);
+                return;
             }
             
-            if (unit) {
-                const unitType = unit.getData('unitType') as UnitType;
-                const currentX = unit.getData('gridX');
-                const currentY = unit.getData('gridY');
-                
-                // Skip processing if duration is zero or negative - prevents instant teleportation
-                if (data.duration <= 0) {
-                    console.log(`Skipping instant movement for unit ${data.id} (duration: ${data.duration})`);
-                    return;
-                }
-                
-                // Get the original color from data or use current fillColor as fallback
-                const originalColor = unit.getData('originalColor') || unit.fillColor;
-                console.log(`unitMoved: Unit ${data.id} (${unitType}) original color: ${originalColor.toString(16)}`);
-                
-                // Ensure unit has the right color before starting movement
-                unit.setFillStyle(originalColor);
-                
-                // Clear current position
-                if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
-                    this.map[currentX][currentY].setData('occupied', false);
-                }
-                
-                // Calculate the actual pixel positions
-                const targetX = data.x * TILE_SIZE + TILE_SIZE/2;
-                const targetY = data.y * TILE_SIZE + TILE_SIZE/2;
-                
-                // Handle turning and movement based on unit type
-                if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
-                    // Log that we're starting a turn
-                    console.log(`unitMoved: Unit ${data.id} starting turn, duration: ${data.turnDuration}ms`);
-                    unit.setVisible(true); // Ensure unit is visible
-                    
-                    this.tweens.add({
-                        targets: unit,
-                        angle: data.facing,
-                        duration: data.turnDuration,
-                        ease: 'Linear',
-                        onComplete: () => {
-                            unit.setData('facing', data.facing);
-                            unit.setFillStyle(originalColor); // Restore color after rotation
-                            console.log(`unitMoved: Unit ${data.id} completed turn, starting movement`);
-                            unit.setVisible(true); // Ensure unit is visible after turn
-                            
-                            this.tweens.add({
-                                targets: unit,
-                                x: targetX,
-                                y: targetY,
-                                duration: data.duration,
-                                ease: 'Linear',
-                                onStart: () => {
-                                    // Make sure color is correct at tween start
-                                    unit.setFillStyle(originalColor);
-                                    unit.setVisible(true); // Ensure unit is visible at start of movement
-                                },
-                                onComplete: () => {
-                                    // Update unit position data
-                                    unit.setData('gridX', data.x);
-                                    unit.setData('gridY', data.y);
-                                    unit.setFillStyle(originalColor); // Restore color
-                                    unit.setVisible(true); // Ensure unit is visible after movement
-                                    console.log(`unitMoved: Unit ${data.id} completed movement to (${data.x},${data.y})`);
-                                    
-                                    if (data.x >= 0 && data.x < MAP_SIZE && data.y >= 0 && data.y < MAP_SIZE) {
-                                        this.map[data.x][data.y].setData('occupied', true);
-                                    }
+            // Get the original color
+            const originalColor = unit.getData('originalColor') || unit.fillColor;
+            
+            // Clear current position
+            if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
+                this.map[currentX][currentY].setData('occupied', false);
+            }
+            
+            // Calculate the actual pixel positions
+            const targetX = data.x * TILE_SIZE + TILE_SIZE/2;
+            const targetY = data.y * TILE_SIZE + TILE_SIZE/2;
+            
+            // Handle turning and movement based on unit type
+            if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
+                // Turn first, then move
+                this.tweens.add({
+                    targets: unit,
+                    angle: data.facing,
+                    duration: data.turnDuration,
+                    ease: 'Linear',
+                    onComplete: () => {
+                        unit.setData('facing', data.facing);
+                        unit.setFillStyle(originalColor);
+                        
+                        this.tweens.add({
+                            targets: unit,
+                            x: targetX,
+                            y: targetY,
+                            duration: data.duration,
+                            ease: 'Linear',
+                            onStart: () => {
+                                unit.setFillStyle(originalColor);
+                                unit.setVisible(true);
+                            },
+                            onComplete: () => {
+                                unit.setData('gridX', data.x);
+                                unit.setData('gridY', data.y);
+                                unit.setFillStyle(originalColor);
+                                unit.setVisible(true);
+                                
+                                if (data.x >= 0 && data.x < MAP_SIZE && data.y >= 0 && data.y < MAP_SIZE) {
+                                    this.map[data.x][data.y].setData('occupied', true);
                                 }
-                            });
-                        }
-                    });
-                } else {
-                    // Infantry or no turning needed
-                    unit.setAngle(data.facing);
-                    unit.setData('facing', data.facing);
-                    unit.setFillStyle(originalColor); // Ensure color is correct
-                    unit.setVisible(true); // Ensure unit is visible
-                    console.log(`unitMoved: Unit ${data.id} starting direct movement, duration: ${data.duration}ms`);
-                    
-                    this.tweens.add({
-                        targets: unit,
-                        x: targetX,
-                        y: targetY,
-                        duration: data.duration,
-                        ease: 'Linear',
-                        onStart: () => {
-                            // Make sure color is correct at tween start
-                            unit.setFillStyle(originalColor);
-                            unit.setVisible(true); // Ensure unit is visible at start of movement
-                        },
-                        onComplete: () => {
-                            // Update unit position data
-                            unit.setData('gridX', data.x);
-                            unit.setData('gridY', data.y);
-                            unit.setFillStyle(originalColor); // Restore color
-                            unit.setVisible(true); // Ensure unit is visible after movement
-                            console.log(`unitMoved: Unit ${data.id} completed direct movement to (${data.x},${data.y})`);
-                            
-                            if (data.x >= 0 && data.x < MAP_SIZE && data.y >= 0 && data.y < MAP_SIZE) {
-                                this.map[data.x][data.y].setData('occupied', true);
                             }
+                        });
+                    }
+                });
+            } else {
+                // Infantry or no turning needed
+                unit.setAngle(data.facing);
+                unit.setData('facing', data.facing);
+                unit.setFillStyle(originalColor);
+                unit.setVisible(true);
+                
+                this.tweens.add({
+                    targets: unit,
+                    x: targetX,
+                    y: targetY,
+                    duration: data.duration,
+                    ease: 'Linear',
+                    onStart: () => {
+                        unit.setFillStyle(originalColor);
+                        unit.setVisible(true);
+                    },
+                    onComplete: () => {
+                        unit.setData('gridX', data.x);
+                        unit.setData('gridY', data.y);
+                        unit.setFillStyle(originalColor);
+                        unit.setVisible(true);
+                        
+                        if (data.x >= 0 && data.x < MAP_SIZE && data.y >= 0 && data.y < MAP_SIZE) {
+                            this.map[data.x][data.y].setData('occupied', true);
                         }
-                    });
-                }
+                    }
+                });
             }
-        });
+        }
     }
 
     private isValidMove(x: number, y: number): boolean {
@@ -459,7 +615,6 @@ class GameScene extends Phaser.Scene {
         
         // Get the original color
         const originalColor = unit.getData('originalColor') || unit.fillColor;
-        console.log(`Client moveUnit: Unit ${unit.getData('id')} (${unitType}) color: ${originalColor.toString(16)}`);
         
         // Calculate distance and duration
         const distance = Phaser.Math.Distance.Between(currentX, currentY, x, y) * TILE_SIZE;
@@ -469,7 +624,6 @@ class GameScene extends Phaser.Scene {
         const MIN_DURATION = 250; // ms
         if (duration < MIN_DURATION) {
             duration = MIN_DURATION;
-            console.log(`Client moveUnit: Adjusted duration to minimum ${MIN_DURATION}ms`);
         }
         
         // Calculate new facing direction
@@ -500,36 +654,42 @@ class GameScene extends Phaser.Scene {
             }
         }
         
-        // Emit move event for multiplayer
-        socket.emit('moveUnit', {
+        // Create the movement command
+        const command = {
             id: unit.getData('id'),
             x: x,
             y: y,
             facing: targetFacing,
             duration: duration,
             turnDuration: turnDuration
-        });
+        };
         
-        // Turn first (for vehicles), then move
-        if (unitType !== 'INFANTRY' && Math.abs(angleDiff) > 5) {
-            this.tweens.add({
-                targets: unit,
-                angle: targetFacing,
-                duration: turnDuration,
-                ease: 'Linear',
-                onComplete: () => {
-                    unit.setData('facing', targetFacing);
-                    unit.setFillStyle(originalColor); // Restore color after rotation
-                    this.performMove(unit, x, y, duration);
-                }
-            });
-        } else {
-            // Infantry turns instantly
-            unit.setAngle(targetFacing);
-            unit.setData('facing', targetFacing);
-            unit.setFillStyle(originalColor); // Ensure color is correct
-            this.performMove(unit, x, y, duration);
-        }
+        // Send the command to the server
+        socket.emit('moveUnit', command);
+        
+        // Add a small latency buffer before starting local movement
+        this.time.delayedCall(100, () => {
+            // Turn first (for vehicles), then move
+            if (unitType !== 'INFANTRY' && Math.abs(angleDiff) > 5) {
+                this.tweens.add({
+                    targets: unit,
+                    angle: targetFacing,
+                    duration: turnDuration,
+                    ease: 'Linear',
+                    onComplete: () => {
+                        unit.setData('facing', targetFacing);
+                        unit.setFillStyle(originalColor); // Restore color after rotation
+                        this.performMove(unit, x, y, duration);
+                    }
+                });
+            } else {
+                // Infantry turns instantly
+                unit.setAngle(targetFacing);
+                unit.setData('facing', targetFacing);
+                unit.setFillStyle(originalColor); // Ensure color is correct
+                this.performMove(unit, x, y, duration);
+            }
+        });
     }
 
     private performMove(unit: Phaser.GameObjects.Rectangle, x: number, y: number, duration: number) {
@@ -1004,6 +1164,70 @@ class GameScene extends Phaser.Scene {
             this.harvestButton.removeEventListener('click', () => {});
         }
     }
+
+    private createMap() {
+        // Create grid-based map
+        for (let x = 0; x < MAP_SIZE; x++) {
+            this.map[x] = [];
+            for (let y = 0; y < MAP_SIZE; y++) {
+                const tileType: TileType = Math.random() < 0.1 ? 'WATER' : 
+                               Math.random() < 0.15 ? 'ORE' : 'GRASS';
+                
+                const tile = this.add.rectangle(
+                    x * TILE_SIZE + TILE_SIZE/2,
+                    y * TILE_SIZE + TILE_SIZE/2,
+                    TILE_SIZE,
+                    TILE_SIZE,
+                    COLORS[tileType]
+                );
+                tile.setStrokeStyle(1, 0x000000);
+                tile.setData('type', tileType);
+                this.map[x][y] = tile;
+            }
+        }
+    }
+
+    private setupInput() {
+        // Set up cleanup when scene stops
+        this.events.on('shutdown', this.cleanupUI, this);
+
+        // Handle unit selection
+        this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
+            if (gameObject.getData('type') === 'UNIT' && gameObject.getData('selectable')) {
+                if (this.selectedUnit) {
+                    this.selectedUnit.setStrokeStyle(1, 0x000000);
+                }
+                this.selectedUnit = gameObject;
+                gameObject.setStrokeStyle(2, 0xffff00);
+                
+                // Enable/disable buttons based on unit type
+                this.updateControlButtons();
+            }
+        });
+
+        // Handle map clicks
+        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            // We're handling minimap clicks in HTML, so this is only for regular map clicks
+            if (this.selectedUnit) {
+                // Account for camera position when calculating grid coordinates
+                const x = Math.floor((pointer.x + this.cameras.main.scrollX) / TILE_SIZE);
+                const y = Math.floor((pointer.y + this.cameras.main.scrollY) / TILE_SIZE);
+                
+                if (this.currentMode === 'normal' && this.isValidMove(x, y)) {
+                    this.moveUnit(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'attack') {
+                    this.attackLocation(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'harvest' && this.selectedUnit.getData('unitType') === 'HARVESTER') {
+                    this.harvestLocation(this.selectedUnit, x, y);
+                } else if (this.currentMode === 'build') {
+                    this.buildStructure(x, y);
+                }
+                
+                // Reset mode after action
+                this.setMode('normal');
+            }
+        });
+    }
 }
 
 const config = {
@@ -1017,7 +1241,7 @@ const config = {
         expandParent: true
     },
     backgroundColor: '#333333',
-    scene: window.location.pathname === '/play' ? [GameScene] : [MainMenu],
+    scene: [MainMenu, GameScene], // Include both scenes
     physics: {
         default: 'arcade',
         arcade: {
@@ -1026,27 +1250,26 @@ const config = {
     }
 };
 
-// Initialize Phaser only on the /play route
-if (window.location.pathname === '/play') {
-  console.log('Creating Phaser game instance');
-  const gameContainer = document.getElementById('game-container') as HTMLElement;
-  if (gameContainer) {
+// Initialize Phaser
+console.log('Creating Phaser game instance');
+const gameContainer = document.getElementById('game-container') as HTMLElement;
+if (gameContainer) {
     gameContainer.style.display = 'block'; // Show game container
-  }
-  const game = new Phaser.Game(config);
+}
+const game = new Phaser.Game(config);
 
-  // Handle window resize
-  window.addEventListener('resize', () => {
+// Start the appropriate scene based on the URL
+if (window.location.pathname === '/play') {
+    game.scene.start('GameScene');
+} else {
+    game.scene.start('MainMenu');
+}
+
+// Handle window resize
+window.addEventListener('resize', () => {
     game.scale.resize(window.innerWidth, window.innerHeight);
     const gameScene = game.scene.getScene('GameScene') as GameScene;
     if (gameScene && gameScene.scene.isActive()) {
-      gameScene.handleResize();
+        gameScene.handleResize();
     }
-  });
-} else {
-  // On any other route, hide game container
-  const gameContainer = document.getElementById('game-container');
-  if (gameContainer) {
-    gameContainer.style.display = 'none'; // Hide game container
-  }
-} 
+}); 

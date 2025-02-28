@@ -347,3 +347,4 @@ Map: Use the original’s map data (from .mix files) to recreate layouts instead
 3. after repeated clicking and attempting to move all over, pieces will appear on page in random places
 4. when mouse goes off screen, at some point it should stop moving the thing...like only move if the mouse is on the page? idk...hmm
 5. related ^^, when clicking mini map, scrolling should stop.
+6. have any undefined routes show "mmm ... what are you doing here?" br br "go <a>home</a>"

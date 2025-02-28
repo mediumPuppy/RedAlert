@@ -10,6 +10,16 @@ export const MAP_HEIGHT = TILE_SIZE * MAP_SIZE; // 4096px (full map height)
 // Add scroll speed (inspired by SCROLL.CPP's ScrollRate)
 export const SCROLL_SPEED = 5; // Pixels per frame when scrolling
 
+// Multiplayer parameters
+export const MAX_PLAYERS_PER_GAME = 6; // Max 6 players per game, per Red Alert
+export const MATCHMAKING_TIMEOUT = 10000; // 10s to find a game
+export const COMMAND_RATE_LIMIT = 100; // 100ms between commands
+export const TEAMS = {
+    ALLIES: 'ALLIES',
+    SOVIETS: 'SOVIETS'
+} as const;
+export type TeamType = typeof TEAMS[keyof typeof TEAMS];
+
 export type TileType = 'GRASS' | 'WATER' | 'ORE';
 export type UnitType = 'TANK' | 'INFANTRY' | 'HARVESTER';
 export type BuildingType = 'BASE' | 'BARRACKS';
