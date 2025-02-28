@@ -69,6 +69,7 @@ interface MoveUnitData {
 const games: Record<string, Game> = {};
 const matchmakingQueue: string[] = [];
 const rateLimit: Record<string, number> = {}; // Player ID -> last command timestamp
+let matchmakingTimer: NodeJS.Timeout | null = null; // Track active timeout
 
 // Handle Socket.IO connections
 io.on('connection', (socket) => {
@@ -115,23 +116,30 @@ io.on('connection', (socket) => {
       socket.emit('matchmakingStarted');
       console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
 
-      // Start game immediately if we have 2-6 players
-      if (matchmakingQueue.length >= 2 && matchmakingQueue.length <= MAX_PLAYERS_PER_GAME) {
-        const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-        createGame(gamePlayers, false); // Multiplayer game
-      }
-
-      // Set a timeout to handle remaining players
-      setTimeout(() => {
-        if (matchmakingQueue.length >= 1) {
-          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-          if (gamePlayers.length === 1) {
-            createGame(gamePlayers, true); // Single-player game
-          } else {
-            createGame(gamePlayers, false); // Multiplayer game with 2+ players
-          }
+      // Start game immediately if we reach MAX_PLAYERS_PER_GAME
+      if (matchmakingQueue.length === MAX_PLAYERS_PER_GAME) {
+        if (matchmakingTimer) {
+          clearTimeout(matchmakingTimer);
+          matchmakingTimer = null;
         }
-      }, MATCHMAKING_TIMEOUT);
+        const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
+        createGame(gamePlayers, false); // Multiplayer game with max players
+      } 
+      // Start timer if this is the first player or timer isn't running
+      else if (!matchmakingTimer) {
+        matchmakingTimer = setTimeout(() => {
+          if (matchmakingQueue.length >= 2) {
+            // Start multiplayer game with 2-5 players
+            const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+            createGame(gamePlayers, false);
+          } else if (matchmakingQueue.length === 1) {
+            // Start single-player game with bot if only one player
+            const gamePlayers = matchmakingQueue.splice(0, 1);
+            createGame(gamePlayers, true);
+          }
+          matchmakingTimer = null;
+        }, MATCHMAKING_TIMEOUT);
+      }
     }
   });
 
@@ -252,6 +260,13 @@ io.on('connection', (socket) => {
     const queueIndex = matchmakingQueue.indexOf(socket.id);
     if (queueIndex !== -1) {
       matchmakingQueue.splice(queueIndex, 1);
+      console.log(`Player ${socket.id} removed from matchmaking queue (${matchmakingQueue.length} players)`);
+      
+      // Clear timer if queue is empty
+      if (matchmakingQueue.length === 0 && matchmakingTimer) {
+        clearTimeout(matchmakingTimer);
+        matchmakingTimer = null;
+      }
     }
     
     // Handle disconnection from a game
