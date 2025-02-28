@@ -1,5 +1,5 @@
 // Instead of importing 'phaser', we'll use the global Phaser object from the CDN
-import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from './game/constants';
+import { TILE_SIZE, GAME_WIDTH, GAME_HEIGHT, GRID_SIZE, COLORS, UNIT_STATS, UnitType, BuildingType, TileType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED, MAX_PLAYERS_PER_GAME } from './game/constants';
 
 // Use the global io object from socket.io CDN
 declare const io: any;
@@ -231,6 +231,22 @@ class GameScene extends Phaser.Scene {
                 this.handleRemoteUnitMovement(data);
             }
         });
+        
+        // Handle disconnection from server
+        socket.on('disconnect', () => {
+            if (this.inLobby) {
+                this.scene.start('MainMenu');
+            } else {
+                this.add.text(centerX, centerY, 'Disconnected from Server', {
+                    fontSize: '24px',
+                    color: '#ffffff',
+                    fontFamily: '"Press Start 2P", cursive',
+                    backgroundColor: '#ff0000',
+                    padding: { x: 20, y: 10 }
+                }).setOrigin(0.5);
+                this.time.delayedCall(2000, () => this.scene.start('MainMenu'));
+            }
+        });
     }
 
     private showLobbyUI(players: { id: string, team: string | null, ready: boolean }[]) {
@@ -253,6 +269,13 @@ class GameScene extends Phaser.Scene {
 
         // Add game ID
         this.add.text(centerX, 100, `Game ID: ${this.gameId}`, {
+            fontSize: '16px',
+            color: '#ffffff',
+            fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5);
+        
+        // Add player count
+        this.add.text(centerX, 130, `Players: ${players.length}/${MAX_PLAYERS_PER_GAME}`, {
             fontSize: '16px',
             color: '#ffffff',
             fontFamily: '"Press Start 2P", cursive'
@@ -1193,7 +1216,7 @@ class GameScene extends Phaser.Scene {
 
         // Handle unit selection
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Rectangle) => {
-            if (gameObject.getData('type') === 'UNIT' && gameObject.getData('selectable')) {
+            if (gameObject.getData('type') === 'UNIT' && gameObject.getData('owner') === socket.id) {
                 if (this.selectedUnit) {
                     this.selectedUnit.setStrokeStyle(1, 0x000000);
                 }

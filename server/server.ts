@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 // Game constants
 const MAP_SIZE = 128;
 const MAX_PLAYERS_PER_GAME = 6;
+const MATCHMAKING_TIMEOUT = 10000; // 10 seconds timeout for matchmaking
 
 // Initialize Express app and HTTP server
 const app = express();
@@ -85,35 +86,48 @@ io.on('connection', (socket) => {
     // Attempt to create a game when enough players are queued
     if (matchmakingQueue.length >= MAX_PLAYERS_PER_GAME) {
       const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
-      const gameId = `game_${Date.now()}`;
-      const initialUnits: Record<string, any> = {};
-
-      games[gameId] = {
-        id: gameId,
-        players: gamePlayers.map(id => ({ id, team: null, ready: false })),
-        mapSize: MAP_SIZE,
-        state: 'LOBBY',
-        units: initialUnits
-      };
-
-      // Create initial units for each player
-      gamePlayers.forEach((playerId, i) => {
-        const startX = i * 5 + 2; // Spread players out
-        initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
-        initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
-        initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
-        
-        // Add player to game room
-        const playerSocket = io.sockets.sockets.get(playerId);
-        if (playerSocket) {
-          playerSocket.join(gameId);
+      createGame(gamePlayers);
+    } else {
+      // Start a timeout to create a game with fewer players if needed
+      setTimeout(() => {
+        if (matchmakingQueue.length > 0 && matchmakingQueue.length < MAX_PLAYERS_PER_GAME) {
+          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+          createGame(gamePlayers);
         }
-      });
-
-      io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
-      console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
+      }, MATCHMAKING_TIMEOUT);
     }
   });
+
+  // Helper function to create a game with the given players
+  function createGame(gamePlayers: string[]) {
+    const gameId = `game_${Date.now()}`;
+    const initialUnits: Record<string, any> = {};
+
+    games[gameId] = {
+      id: gameId,
+      players: gamePlayers.map(id => ({ id, team: null, ready: false })),
+      mapSize: MAP_SIZE,
+      state: 'LOBBY',
+      units: initialUnits
+    };
+
+    // Create initial units for each player
+    gamePlayers.forEach((playerId, i) => {
+      const startX = i * 5 + 2; // Spread players out
+      initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
+      initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
+      initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
+      
+      // Add player to game room
+      const playerSocket = io.sockets.sockets.get(playerId);
+      if (playerSocket) {
+        playerSocket.join(gameId);
+      }
+    });
+
+    io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
+    console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
+  }
 
   // Set team
   socket.on('setTeam', ({ gameId, team }: { gameId: string, team: string }) => {
@@ -163,6 +177,15 @@ io.on('connection', (socket) => {
       if (unit && unit.owner === socket.id && 
           data.x >= 0 && data.x < MAP_SIZE && 
           data.y >= 0 && data.y < MAP_SIZE) {
+        
+        // Check if the target tile is occupied by another unit
+        const isOccupied = Object.values(games[gameId].units).some(u => 
+          u.x === data.x && u.y === data.y && data.id !== u.owner
+        );
+        
+        if (isOccupied) {
+          return; // Skip move if target is occupied
+        }
         
         // Update unit position on server
         unit.x = data.x;
