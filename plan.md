@@ -69,7 +69,7 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
 
 **Tasks**:
 - **Setup Phaser**:
-  - Create `client/index.js` with:
+  - Create `client/index.ts` with:
     ```javascript
     const config = { type: Phaser.WEBGL, width: 800, height: 600, scene: { preload, create, update } };
     const game = new Phaser.Game(config);
@@ -328,3 +328,14 @@ These extra steps transform the initial 24-hour prototype into a professional-gr
 - **Balancing/Testing** ensure quality.
 
 To execute, prioritize post-24-hour development in phases: AI and maps first for gameplay depth, then multiplayer and assets for polish, with balancing ongoing. Use AWS EC2 as the backbone, scaling as needed with CLI automation. Ready to dive deeper into any of these? Let me know!
+
+
+
+Making It More Like Old Red Alert
+
+Using EA’s open-source code (available on GitHub):
+
+Port Original Logic: Adapt RedAlert.dll code for combat (target.health -= attacker.damage) and movement to match the original’s grid-based rules. Study the C++ source for exact formulas.
+
+Timing: Mimic the original’s speed by adjusting Phaser tweens to match 1996 frame rates (e.g., tweak duration in moveUnit to 500ms or test against old gameplay videos).
+Map: Use the original’s map data (from .mix files) to recreate layouts instead of random generation.
