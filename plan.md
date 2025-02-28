@@ -344,3 +344,6 @@ Map: Use the original’s map data (from .mix files) to recreate layouts instead
 ## problems
 1. fix resizing of the game to not scrunch screen
 2. sound turns on only if u turn it off and on before clicking play
+3. after repeated clicking and attempting to move all over, pieces will appear on page in random places
+4. when mouse goes off screen, at some point it should stop moving the thing...like only move if the mouse is on the page? idk...hmm
+5. related ^^, when clicking mini map, scrolling should stop.

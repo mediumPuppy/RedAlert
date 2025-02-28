@@ -26,6 +26,16 @@ app.use(express.static(path.join(__dirname, '../client')));
 // Also serve files from the client/dist directory
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
+// Add route for the /home path
+app.get('/home', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/index.html'));
+});
+
+// Catch-all route to handle client-side routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/index.html'));
+});
+
 // Define interface for movement data
 interface MoveUnitData {
   id: string;

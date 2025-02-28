@@ -9,8 +9,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
-    "types": ["phaser"],
-    "allowJs": true
+    "types": ["phaser", "react", "react-dom"],
+    "allowJs": true,
+    "jsx": "react",
+    "lib": ["dom", "dom.iterable", "esnext"]
   },
   "include": ["./**/*"],
   "exclude": ["node_modules", "dist"]

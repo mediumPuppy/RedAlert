@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, FacingDirection, TERRAIN_SPEED_MODIFIERS } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from '../constants';
 export class GameScene extends Scene {
     constructor() {
         super({ key: 'GameScene' });
@@ -8,17 +8,60 @@ export class GameScene extends Scene {
         this.units = [];
         this.selectedUnit = null;
         this.resources = 1000;
+        this.minimapCanvas = null;
+        this.minimapContext = null;
+        this.minimapContainer = null;
     }
     create() {
         this.createMap();
         this.createInitialUnits();
         this.createUI();
         this.setupInput();
+        // Set up camera for large map
+        this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        this.cameras.main.setViewport(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        // Start camera at center of map
+        this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
+        this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
+        // Set up HTML minimap
+        this.setupHtmlMinimap();
+        this.updateMinimap();
+        // Set up cleanup when scene stops
+        this.events.on('shutdown', this.cleanupMinimap, this);
+    }
+    setupHtmlMinimap() {
+        // Get the minimap container and canvas
+        this.minimapContainer = document.getElementById('minimap-container');
+        this.minimapCanvas = document.getElementById('minimap-canvas');
+        if (this.minimapContainer && this.minimapCanvas) {
+            // Show the minimap container
+            this.minimapContainer.style.display = 'block';
+            // Get the canvas context
+            this.minimapContext = this.minimapCanvas.getContext('2d');
+            // Set canvas size
+            this.minimapCanvas.width = MAP_SIZE * 1.5;
+            this.minimapCanvas.height = MAP_SIZE * 1.5;
+            // Add click listener to minimap
+            this.minimapCanvas.addEventListener('click', (event) => {
+                const rect = this.minimapCanvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                // Convert click position to map position
+                const relativeX = x / this.minimapCanvas.width;
+                const relativeY = y / this.minimapCanvas.height;
+                // Calculate target camera position (center on the clicked point)
+                const targetX = relativeX * MAP_WIDTH - GAME_WIDTH / 2;
+                const targetY = relativeY * MAP_HEIGHT - GAME_HEIGHT / 2;
+                // Bound camera position within map bounds
+                this.cameras.main.scrollX = Math.max(0, Math.min(MAP_WIDTH - GAME_WIDTH, targetX));
+                this.cameras.main.scrollY = Math.max(0, Math.min(MAP_HEIGHT - GAME_HEIGHT, targetY));
+            });
+        }
     }
     createMap() {
-        for (let x = 0; x < GRID_SIZE; x++) {
+        for (let x = 0; x < MAP_SIZE; x++) {
             this.map[x] = [];
-            for (let y = 0; y < GRID_SIZE; y++) {
+            for (let y = 0; y < MAP_SIZE; y++) {
                 const tileType = Math.random() < 0.1 ? 'WATER' :
                     Math.random() < 0.15 ? 'ORE' : 'GRASS';
                 const tile = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, COLORS[tileType]);
@@ -58,11 +101,12 @@ export class GameScene extends Scene {
             }
         });
         this.input.on('pointerdown', (pointer) => {
+            // We're handling minimap clicks in HTML now, so we only need to handle regular map clicks
             if (!this.selectedUnit)
                 return;
             const scaleFactor = this.getScaleFactor();
-            const x = Math.floor((pointer.x / scaleFactor) / TILE_SIZE);
-            const y = Math.floor((pointer.y / scaleFactor) / TILE_SIZE);
+            const x = Math.floor((pointer.x / scaleFactor + this.cameras.main.scrollX) / TILE_SIZE);
+            const y = Math.floor((pointer.y / scaleFactor + this.cameras.main.scrollY) / TILE_SIZE);
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
                 if (this.selectedUnit.getData('unitType') === 'HARVESTER' && tile.getData('type') === 'ORE') {
@@ -79,6 +123,27 @@ export class GameScene extends Scene {
             const health = unit.getData('health');
             return health !== undefined && health > 0;
         });
+        // Scroll based on mouse position (inspired by SCROLL.CPP)
+        const pointer = this.input.activePointer;
+        const cam = this.cameras.main;
+        const edgeSize = 50; // Pixels from edge to trigger scrolling
+        if (pointer.isDown || pointer.active) {
+            if (pointer.x < edgeSize && cam.scrollX > 0) {
+                cam.scrollX -= SCROLL_SPEED;
+            }
+            else if (pointer.x > GAME_WIDTH - edgeSize && cam.scrollX < MAP_WIDTH - GAME_WIDTH) {
+                cam.scrollX += SCROLL_SPEED;
+            }
+            if (pointer.y < edgeSize && cam.scrollY > 0) {
+                cam.scrollY -= SCROLL_SPEED;
+            }
+            else if (pointer.y > GAME_HEIGHT - edgeSize && cam.scrollY < MAP_HEIGHT - GAME_HEIGHT) {
+                cam.scrollY += SCROLL_SPEED;
+            }
+        }
+        this.updateMapPositions(); // Update visible tiles
+        this.updateUnitPositions(); // Update unit positions relative to camera
+        this.updateMinimap(); // Update minimap each frame
     }
     getScaleFactor() {
         return this.scale.width / GAME_WIDTH;
@@ -108,8 +173,16 @@ export class GameScene extends Scene {
     }
     updateMapPositions() {
         const scaleFactor = this.getScaleFactor();
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
+        const cam = this.cameras.main; // Get the main camera
+        const camX = cam.scrollX; // Camera's X offset
+        const camY = cam.scrollY; // Camera's Y offset
+        // Only position tiles within or near the viewport for performance
+        const startX = Math.max(0, Math.floor(camX / TILE_SIZE));
+        const startY = Math.max(0, Math.floor(camY / TILE_SIZE));
+        const endX = Math.min(MAP_SIZE, startX + GRID_SIZE + 1);
+        const endY = Math.min(MAP_SIZE, startY + GRID_SIZE + 1);
+        for (let x = startX; x < endX; x++) {
+            for (let y = startY; y < endY; y++) {
                 const tile = this.map[x][y];
                 tile.setPosition((x * TILE_SIZE + TILE_SIZE / 2) * scaleFactor, (y * TILE_SIZE + TILE_SIZE / 2) * scaleFactor);
                 tile.setScale(scaleFactor);
@@ -142,7 +215,7 @@ export class GameScene extends Scene {
         this.updateUIPositions();
     }
     isValidMove(x, y) {
-        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE)
+        if (x < 0 || x >= MAP_SIZE || y < 0 || y >= MAP_SIZE)
             return false;
         if (this.map[x][y].getData('type') === 'WATER')
             return false;
@@ -214,11 +287,11 @@ export class GameScene extends Scene {
             turnDuration = MIN_DURATION;
         }
         // Only unset occupied if current position is valid
-        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
+        if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
             this.map[currentX][currentY].setData('occupied', false);
         }
         // Only set occupied if target is valid and not already occupied by another unit
-        if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+        if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
             const alreadyOccupied = this.units.some(u => u !== unit && u.getData('gridX') === x && u.getData('gridY') === y);
             if (!alreadyOccupied) {
                 this.map[x][y].setData('occupied', true);
@@ -320,5 +393,59 @@ export class GameScene extends Scene {
         const originalColor = oreTile.fillColor;
         oreTile.setFillStyle(0xffffff);
         this.time.delayedCall(200, () => oreTile.setFillStyle(originalColor));
+    }
+    updateMinimap() {
+        if (!this.minimapContext || !this.minimapCanvas)
+            return;
+        const ctx = this.minimapContext;
+        const scale = 1.5; // Scale for minimap
+        // Clear the canvas
+        ctx.clearRect(0, 0, this.minimapCanvas.width, this.minimapCanvas.height);
+        // Draw background
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, MAP_SIZE * scale, MAP_SIZE * scale);
+        // Draw tiles
+        for (let x = 0; x < MAP_SIZE; x++) {
+            for (let y = 0; y < MAP_SIZE; y++) {
+                const tile = this.map[x][y];
+                const tileType = tile.getData('type');
+                ctx.fillStyle = '#' + COLORS[tileType].toString(16).padStart(6, '0');
+                ctx.globalAlpha = 0.7;
+                ctx.fillRect(x * scale, y * scale, scale, scale);
+            }
+        }
+        // Draw units
+        ctx.globalAlpha = 1.0;
+        this.units.forEach(unit => {
+            const unitType = unit.getData('unitType');
+            const gridX = unit.getData('gridX');
+            const gridY = unit.getData('gridY');
+            ctx.fillStyle = '#' + COLORS[unitType].toString(16).padStart(6, '0');
+            // Make units slightly larger on minimap for better visibility
+            const unitSize = scale * 1.5;
+            ctx.fillRect(gridX * scale - unitSize / 4, gridY * scale - unitSize / 4, unitSize, unitSize);
+        });
+        // Draw viewport rectangle
+        const cam = this.cameras.main;
+        const viewX = cam.scrollX / TILE_SIZE * scale;
+        const viewY = cam.scrollY / TILE_SIZE * scale;
+        const viewWidth = GRID_SIZE * scale;
+        const viewHeight = GRID_SIZE * scale;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+    }
+    // Method to clean up minimap when scene is stopped
+    cleanupMinimap() {
+        // Hide the minimap container when leaving the scene
+        if (this.minimapContainer) {
+            this.minimapContainer.style.display = 'none';
+        }
+        // Clean up event listeners
+        if (this.minimapCanvas) {
+            // Clean up would be better with a named function reference
+            // But for now we'll just remove all
+            this.minimapCanvas.removeEventListener('click', () => { });
+        }
     }
 }

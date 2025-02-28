@@ -2,6 +2,11 @@ export const TILE_SIZE = 32; // Classic size from original game
 export const GRID_SIZE = 20;
 export const GAME_WIDTH = TILE_SIZE * GRID_SIZE; // 640px
 export const GAME_HEIGHT = TILE_SIZE * GRID_SIZE; // 640px
+export const MAP_SIZE = 128; // Total map size (much larger)
+export const MAP_WIDTH = TILE_SIZE * MAP_SIZE; // 4096px (full map width) 
+export const MAP_HEIGHT = TILE_SIZE * MAP_SIZE; // 4096px (full map height)
+// Add scroll speed (inspired by SCROLL.CPP's ScrollRate)
+export const SCROLL_SPEED = 5; // Pixels per frame when scrolling
 // Add 8 cardinal directions (in degrees)
 export var FacingDirection;
 (function (FacingDirection) {

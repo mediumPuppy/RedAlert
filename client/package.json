@@ -3,20 +3,30 @@
   "version": "1.0.0",
   "description": "Client for RedAlert game",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "dev": "tsc -w"
+    "build": "webpack --mode production",
+    "watch": "webpack --watch --mode development",
+    "dev": "webpack serve --mode development --open"
   },
   "dependencies": {
-    "phaser": "^3.55.2",
-    "socket.io-client": "^4.7.4"
+    "@types/react": "^18.2.21",
+    "@types/react-dom": "^18.2.7",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/styled-components": "^5.1.26",
+    "phaser": "^3.88.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.15.0",
+    "socket.io-client": "^4.7.4",
+    "styled-components": "^6.0.7"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
     "@types/node": "^20.11.19",
     "@types/socket.io-client": "^1.4.36",
+    "css-loader": "^6.8.1",
     "phaser": "^3.88.2",
+    "style-loader": "^3.3.3",
     "ts-loader": "^9.5.2",
+    "typescript": "^5.3.3",
     "webpack": "^5.98.0",
     "webpack-cli": "^6.0.1",
     "webpack-dev-server": "^5.2.0"
