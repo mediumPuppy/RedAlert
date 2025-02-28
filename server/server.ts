@@ -42,9 +42,14 @@ io.on('connection', (socket) => {
 
   // Listen for unit movement from a client with enhanced data
   socket.on('moveUnit', (data: MoveUnitData) => {
-    console.log(`Unit ${data.id} moved to (${data.x}, ${data.y}) facing ${data.facing || 'undefined'} (duration: ${data.duration}, turnDuration: ${data.turnDuration})`);
+    console.log(`Server received: Unit ${data.id} moved to (${data.x}, ${data.y}) facing ${data.facing || 'undefined'} (duration: ${data.duration}, turnDuration: ${data.turnDuration})`);
+    
+    // Log the full data object for debugging
+    console.log('Full move data:', JSON.stringify(data));
+    
     // Broadcast the movement to all connected clients
     io.emit('unitMoved', data);
+    console.log(`Server broadcasted movement for unit ${data.id}`);
   });
 
   // Handle player disconnect

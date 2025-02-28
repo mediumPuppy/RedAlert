@@ -86,6 +86,8 @@ export class GameScene extends Scene {
     createUnit(type, gridX, gridY) {
         const size = type === 'INFANTRY' ? TILE_SIZE / 2 : TILE_SIZE;
         const unit = this.add.rectangle(0, 0, size, size, COLORS[type]);
+        // Generate a truly unique ID with type prefix and timestamp
+        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
@@ -96,11 +98,12 @@ export class GameScene extends Scene {
         unit.setData('gridY', gridY);
         unit.setData('facing', FacingDirection.NORTH); // Initial facing direction
         unit.setAngle(FacingDirection.NORTH); // Explicitly set initial angle to match facing
-        unit.setData('id', Date.now().toString()); // Unique ID for multiplayer
+        unit.setData('id', uniqueId); // Unique ID for multiplayer
+        unit.setData('originalColor', COLORS[type]); // Store original color in data
         unit.setInteractive();
         this.units.push(unit); // Explicitly track the unit
         this.updateUnitPosition(unit); // Position unit initially
-        console.log(`Created unit ${type} with ID ${unit.getData('id')} and color ${COLORS[type].toString(16)}`); // Debug
+        console.log(`GameScene: Created unit ${type} with ID ${uniqueId} and color ${COLORS[type].toString(16)}`); // Debug
         return unit;
     }
     updateMapPositions() {
@@ -184,7 +187,7 @@ export class GameScene extends Scene {
         const unitType = unit.getData('unitType');
         const currentX = unit.getData('gridX');
         const currentY = unit.getData('gridY');
-        const originalColor = unit.fillColor;
+        const originalColor = unit.getData('originalColor') || unit.fillColor;
         console.log(`moveUnit: Unit ${unit.getData('id')} (${unitType}) color before move: ${originalColor.toString(16)}`); // Debug
         const targetTile = this.map[x][y];
         const terrainType = targetTile.getData('type');
@@ -193,13 +196,23 @@ export class GameScene extends Scene {
         const turnSpeed = UNIT_STATS[unitType].turnSpeed || 180;
         // Calculate distance and duration
         const distance = Phaser.Math.Distance.Between(currentX, currentY, x, y) * TILE_SIZE;
-        const duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        let duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        // Ensure minimum duration to prevent teleporting
+        const MIN_DURATION = 250; // ms
+        if (duration < MIN_DURATION) {
+            duration = MIN_DURATION;
+            console.log(`moveUnit: Adjusted duration to minimum ${MIN_DURATION}ms for unit ${unit.getData('id')}`);
+        }
         // Calculate new facing direction
         const targetFacing = this.calculateFacing(currentX, currentY, x, y);
         const currentFacing = unit.getData('facing');
         // Calculate turn duration (if needed)
         const angleDiff = Phaser.Math.Angle.ShortestBetween(currentFacing, targetFacing);
-        const turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
+        let turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
+        // Ensure minimum turn duration
+        if (turnDuration > 0 && turnDuration < MIN_DURATION) {
+            turnDuration = MIN_DURATION;
+        }
         // Only unset occupied if current position is valid
         if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
             this.map[currentX][currentY].setData('occupied', false);
@@ -231,6 +244,7 @@ export class GameScene extends Scene {
                 ease: 'Linear',
                 onComplete: () => {
                     unit.setData('facing', targetFacing);
+                    unit.setFillStyle(originalColor); // Restore color after rotation
                     this.performMove(unit, x, y, duration);
                 }
             });
@@ -239,6 +253,7 @@ export class GameScene extends Scene {
             // Infantry turns instantly
             unit.setAngle(targetFacing);
             unit.setData('facing', targetFacing);
+            unit.setFillStyle(originalColor); // Ensure color is correct before move
             this.performMove(unit, x, y, duration);
         }
     }
@@ -246,13 +261,20 @@ export class GameScene extends Scene {
         const scaleFactor = this.getScaleFactor();
         const targetX = (x * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
         const targetY = (y * TILE_SIZE + TILE_SIZE / 2) * scaleFactor;
-        const originalColor = unit.fillColor; // Store original color
+        // Get the original color from data or use current fillColor as fallback
+        const originalColor = unit.getData('originalColor') || unit.fillColor;
+        // Ensure unit has the right color before starting movement
+        unit.setFillStyle(originalColor);
         this.tweens.add({
             targets: unit,
             x: targetX,
             y: targetY,
             duration: duration,
             ease: 'Linear', // Linear for constant speed movement
+            onStart: () => {
+                // Make sure color is correct at tween start
+                unit.setFillStyle(originalColor);
+            },
             onComplete: () => {
                 unit.setData('gridX', x);
                 unit.setData('gridY', y);
@@ -275,9 +297,10 @@ export class GameScene extends Scene {
             if (targetHealth <= 0) {
                 target.destroy();
             }
-            // Visual feedback
-            const originalColor = target.fillColor;
-            console.log(`Attack: Target original color: ${originalColor.toString(16)}`); // Debug
+            // Visual feedback - get stored original color
+            const originalColor = target.getData('originalColor') || target.fillColor;
+            console.log(`Attack: Target ${target.getData('id')} (${target.getData('unitType')}) original color: ${originalColor.toString(16)}`); // Debug
+            // Flash red for attack
             target.setFillStyle(0xff0000);
             this.time.delayedCall(100, () => {
                 target.setFillStyle(originalColor);

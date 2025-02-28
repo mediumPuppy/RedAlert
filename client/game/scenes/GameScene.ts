@@ -98,6 +98,10 @@ export class GameScene extends Scene {
     private createUnit(type: UnitType, gridX: number, gridY: number) {
         const size = type === 'INFANTRY' ? TILE_SIZE/2 : TILE_SIZE;
         const unit = this.add.rectangle(0, 0, size, size, COLORS[type]);
+        
+        // Generate a truly unique ID with type prefix and timestamp
+        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        
         unit.setStrokeStyle(1, 0x000000);
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
@@ -108,13 +112,13 @@ export class GameScene extends Scene {
         unit.setData('gridY', gridY);
         unit.setData('facing', FacingDirection.NORTH); // Initial facing direction
         unit.setAngle(FacingDirection.NORTH); // Explicitly set initial angle to match facing
-        unit.setData('id', Date.now().toString()); // Unique ID for multiplayer
+        unit.setData('id', uniqueId); // Unique ID for multiplayer
         unit.setData('originalColor', COLORS[type]); // Store original color in data
         unit.setInteractive();
         
         this.units.push(unit); // Explicitly track the unit
         this.updateUnitPosition(unit); // Position unit initially
-        console.log(`GameScene: Created unit ${type} with ID ${unit.getData('id')} and color ${COLORS[type].toString(16)}`); // Debug
+        console.log(`GameScene: Created unit ${type} with ID ${uniqueId} and color ${COLORS[type].toString(16)}`); // Debug
         return unit;
     }
 

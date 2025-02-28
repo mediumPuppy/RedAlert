@@ -77,6 +77,7 @@ class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
         this.map = [];
+        this.units = [];
         this.selectedUnit = null;
         this.resources = 1000;
     }
@@ -142,35 +143,72 @@ class GameScene extends Phaser.Scene {
         });
         // Keep your existing socket listeners but update for enhanced movement
         socket.on('unitMoved', (data) => {
-            const unit = this.children.getAll().find((obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id);
+            console.log(`Received unitMoved event for ID: ${data.id}`);
+            // Debug: list all unit IDs in the scene
+            console.log(`Available units: ${this.units.length}`);
+            this.units.forEach((u) => {
+                console.log(`- Unit: ${u.getData('unitType')} with ID: ${u.getData('id')} and color: ${u.fillColor.toString(16)}`);
+            });
+            // First try to find the unit in our tracked units array
+            let unit = this.units.find(u => u.getData('id') === data.id);
+            // If not found, fall back to searching all game objects
+            if (!unit) {
+                unit = this.children.getAll().find((obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id);
+                if (unit) {
+                    // If found in children but not in units array, add it to the array for future lookups
+                    this.units.push(unit);
+                    console.log(`Added previously untracked unit ${data.id} to units array`);
+                }
+            }
             if (unit) {
                 const unitType = unit.getData('unitType');
                 const currentX = unit.getData('gridX');
                 const currentY = unit.getData('gridY');
-                const originalColor = unit.fillColor; // Preserve color
+                // Get the original color from data or use current fillColor as fallback
+                const originalColor = unit.getData('originalColor') || unit.fillColor;
+                console.log(`unitMoved: Unit ${data.id} (${unitType}) original color: ${originalColor.toString(16)}`);
+                // Ensure unit has the right color before starting movement
+                unit.setFillStyle(originalColor);
                 // Clear current position
                 if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
                     this.map[currentX][currentY].setData('occupied', false);
                 }
+                // Calculate the actual pixel positions
+                const targetX = data.x * TILE_SIZE + TILE_SIZE / 2;
+                const targetY = data.y * TILE_SIZE + TILE_SIZE / 2;
                 // Handle turning and movement based on unit type
                 if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
+                    // Log that we're starting a turn
+                    console.log(`unitMoved: Unit ${data.id} starting turn, duration: ${data.turnDuration}ms`);
+                    unit.setVisible(true); // Ensure unit is visible
                     this.tweens.add({
                         targets: unit,
                         angle: data.facing,
-                        duration: data.turnDuration,
+                        duration: data.turnDuration || 250, // Use default if missing
                         ease: 'Linear',
                         onComplete: () => {
                             unit.setData('facing', data.facing);
+                            unit.setFillStyle(originalColor); // Restore color after rotation
+                            console.log(`unitMoved: Unit ${data.id} completed turn, starting movement`);
+                            unit.setVisible(true); // Ensure unit is visible after turn
                             this.tweens.add({
                                 targets: unit,
-                                x: data.x * TILE_SIZE + TILE_SIZE / 2,
-                                y: data.y * TILE_SIZE + TILE_SIZE / 2,
-                                duration: data.duration,
+                                x: targetX,
+                                y: targetY,
+                                duration: data.duration || 500, // Use default if missing
                                 ease: 'Linear',
+                                onStart: () => {
+                                    // Make sure color is correct at tween start
+                                    unit.setFillStyle(originalColor);
+                                    unit.setVisible(true); // Ensure unit is visible at start of movement
+                                },
                                 onComplete: () => {
+                                    // Update unit position data
                                     unit.setData('gridX', data.x);
                                     unit.setData('gridY', data.y);
                                     unit.setFillStyle(originalColor); // Restore color
+                                    unit.setVisible(true); // Ensure unit is visible after movement
+                                    console.log(`unitMoved: Unit ${data.id} completed movement to (${data.x},${data.y})`);
                                     if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
                                         this.map[data.x][data.y].setData('occupied', true);
                                     }
@@ -183,16 +221,27 @@ class GameScene extends Phaser.Scene {
                     // Infantry or no turning needed
                     unit.setAngle(data.facing);
                     unit.setData('facing', data.facing);
+                    unit.setFillStyle(originalColor); // Ensure color is correct
+                    unit.setVisible(true); // Ensure unit is visible
+                    console.log(`unitMoved: Unit ${data.id} starting direct movement, duration: ${data.duration}ms`);
                     this.tweens.add({
                         targets: unit,
-                        x: data.x * TILE_SIZE + TILE_SIZE / 2,
-                        y: data.y * TILE_SIZE + TILE_SIZE / 2,
-                        duration: data.duration,
+                        x: targetX,
+                        y: targetY,
+                        duration: data.duration || 500, // Use default if missing
                         ease: 'Linear',
+                        onStart: () => {
+                            // Make sure color is correct at tween start
+                            unit.setFillStyle(originalColor);
+                            unit.setVisible(true); // Ensure unit is visible at start of movement
+                        },
                         onComplete: () => {
+                            // Update unit position data
                             unit.setData('gridX', data.x);
                             unit.setData('gridY', data.y);
                             unit.setFillStyle(originalColor); // Restore color
+                            unit.setVisible(true); // Ensure unit is visible after movement
+                            console.log(`unitMoved: Unit ${data.id} completed direct movement to (${data.x},${data.y})`);
                             if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
                                 this.map[data.x][data.y].setData('occupied', true);
                             }
@@ -221,11 +270,18 @@ class GameScene extends Phaser.Scene {
     }
     createUnit(type, gridX, gridY) {
         const unit = this.add.rectangle(gridX * TILE_SIZE + TILE_SIZE / 2, gridY * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE * 0.8, TILE_SIZE * 0.8, COLORS[type]);
+        // Generate a truly unique ID with type prefix and timestamp
+        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         unit.setStrokeStyle(1, 0x000000);
         unit.setInteractive();
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
-        unit.setData('id', Date.now().toString());
+        unit.setData('id', uniqueId);
+        unit.setData('originalColor', COLORS[type]); // Store original color in data
+        unit.setData('facing', FacingDirection.NORTH); // Set initial facing
+        unit.setAngle(FacingDirection.NORTH); // Set initial angle
+        unit.setData('gridX', gridX); // Set initial grid position
+        unit.setData('gridY', gridY); // Set initial grid position
         const stats = UNIT_STATS[type];
         unit.setData('health', stats.health);
         unit.setData('damage', stats.damage || 0);
@@ -237,6 +293,9 @@ class GameScene extends Phaser.Scene {
         }
         // Mark the tile as occupied
         this.map[gridX][gridY].setData('occupied', true);
+        // Add unit to tracking array
+        this.units.push(unit);
+        console.log(`Client: Created unit ${type} with ID ${uniqueId} and color ${COLORS[type].toString(16)}`); // Debug
         return unit;
     }
     createBuilding(type, gridX, gridY) {
@@ -260,22 +319,38 @@ class GameScene extends Phaser.Scene {
         const terrainModifier = TERRAIN_SPEED_MODIFIERS[terrainType];
         const baseSpeed = UNIT_STATS[unitType].speed;
         const turnSpeed = UNIT_STATS[unitType].turnSpeed || 180;
+        // Get the original color
+        const originalColor = unit.getData('originalColor') || unit.fillColor;
+        console.log(`Client moveUnit: Unit ${unit.getData('id')} (${unitType}) color: ${originalColor.toString(16)}`);
         // Calculate distance and duration
         const distance = Phaser.Math.Distance.Between(currentX, currentY, x, y) * TILE_SIZE;
-        const duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        let duration = (distance / (baseSpeed * terrainModifier)) * 1000; // Convert to ms
+        // Ensure minimum duration to prevent teleporting
+        const MIN_DURATION = 250; // ms
+        if (duration < MIN_DURATION) {
+            duration = MIN_DURATION;
+            console.log(`Client moveUnit: Adjusted duration to minimum ${MIN_DURATION}ms`);
+        }
         // Calculate new facing direction
         const targetFacing = this.calculateFacing(currentX, currentY, x, y);
         const currentFacing = unit.getData('facing');
         // Calculate turn duration (if needed)
         const angleDiff = Phaser.Math.Angle.ShortestBetween(currentFacing, targetFacing);
-        const turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
-        // Mark current position as unoccupied
-        if (this.map[currentX] && this.map[currentX][currentY]) {
+        let turnDuration = Math.abs(angleDiff) / turnSpeed * 1000;
+        // Ensure minimum turn duration
+        if (turnDuration > 0 && turnDuration < MIN_DURATION) {
+            turnDuration = MIN_DURATION;
+        }
+        // Only unset occupied if current position is valid
+        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
             this.map[currentX][currentY].setData('occupied', false);
         }
-        // Mark target position as occupied
-        if (this.map[x] && this.map[x][y]) {
-            this.map[x][y].setData('occupied', true);
+        // Only set occupied if target is valid and not already occupied by another unit
+        if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+            const alreadyOccupied = this.units.some(u => u !== unit && u.getData('gridX') === x && u.getData('gridY') === y);
+            if (!alreadyOccupied) {
+                this.map[x][y].setData('occupied', true);
+            }
         }
         // Emit move event for multiplayer
         socket.emit('moveUnit', {
@@ -295,6 +370,7 @@ class GameScene extends Phaser.Scene {
                 ease: 'Linear',
                 onComplete: () => {
                     unit.setData('facing', targetFacing);
+                    unit.setFillStyle(originalColor); // Restore color after rotation
                     this.performMove(unit, x, y, duration);
                 }
             });
@@ -303,21 +379,38 @@ class GameScene extends Phaser.Scene {
             // Infantry turns instantly
             unit.setAngle(targetFacing);
             unit.setData('facing', targetFacing);
+            unit.setFillStyle(originalColor); // Ensure color is correct
             this.performMove(unit, x, y, duration);
         }
     }
     performMove(unit, x, y, duration) {
         const targetX = x * TILE_SIZE + TILE_SIZE / 2;
         const targetY = y * TILE_SIZE + TILE_SIZE / 2;
+        // Get the original color
+        const originalColor = unit.getData('originalColor') || unit.fillColor;
+        console.log(`performMove: Unit ${unit.getData('id')} original color: ${originalColor.toString(16)} moving to (${x},${y})`);
+        // Ensure unit has the right color before starting movement
+        unit.setFillStyle(originalColor);
         this.tweens.add({
             targets: unit,
             x: targetX,
             y: targetY,
             duration: duration,
             ease: 'Linear', // Linear for constant speed movement
+            onStart: () => {
+                // Make sure color is correct at tween start
+                unit.setFillStyle(originalColor);
+                console.log(`performMove onStart: Unit ${unit.getData('id')} color: ${originalColor.toString(16)}`);
+            },
             onComplete: () => {
+                // Update unit's internal position data
                 unit.setData('gridX', x);
                 unit.setData('gridY', y);
+                // Restore original color
+                unit.setFillStyle(originalColor);
+                // Make unit visible if it somehow became invisible
+                unit.setVisible(true);
+                console.log(`Client performMove complete: Unit ${unit.getData('id')} at (${x},${y}) color: ${originalColor.toString(16)}`);
             }
         });
     }
@@ -355,6 +448,13 @@ class GameScene extends Phaser.Scene {
     handleResize() {
         // Implement the logic to handle resizing the game scene
         console.log('GameScene handleResize called');
+    }
+    update() {
+        // Filter out destroyed or dead units
+        this.units = this.units.filter(unit => {
+            const health = unit.getData('health');
+            return unit.active && health !== undefined && health > 0;
+        });
     }
 }
 const config = {

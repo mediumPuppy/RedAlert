@@ -102,6 +102,7 @@ class MainMenu extends Phaser.Scene {
 
 class GameScene extends Phaser.Scene {
     private map: Phaser.GameObjects.Rectangle[][] = [];
+    private units: Phaser.GameObjects.Rectangle[] = [];
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
@@ -187,9 +188,29 @@ class GameScene extends Phaser.Scene {
 
         // Keep your existing socket listeners but update for enhanced movement
         socket.on('unitMoved', (data: UnitMovedData) => {
-            const unit = this.children.getAll().find(
-                (obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id
-            ) as Phaser.GameObjects.Rectangle | undefined;
+            console.log(`Received unitMoved event for ID: ${data.id}`);
+            
+            // Debug: list all unit IDs in the scene
+            console.log(`Available units: ${this.units.length}`);
+            this.units.forEach((u: any) => {
+                console.log(`- Unit: ${u.getData('unitType')} with ID: ${u.getData('id')} and color: ${u.fillColor.toString(16)}`);
+            });
+            
+            // First try to find the unit in our tracked units array
+            let unit = this.units.find(u => u.getData('id') === data.id);
+            
+            // If not found, fall back to searching all game objects
+            if (!unit) {
+                unit = this.children.getAll().find(
+                    (obj) => obj instanceof Phaser.GameObjects.Rectangle && obj.getData('id') === data.id
+                ) as Phaser.GameObjects.Rectangle | undefined;
+                
+                if (unit) {
+                    // If found in children but not in units array, add it to the array for future lookups
+                    this.units.push(unit as Phaser.GameObjects.Rectangle);
+                    console.log(`Added previously untracked unit ${data.id} to units array`);
+                }
+            }
             
             if (unit) {
                 const unitType = unit.getData('unitType') as UnitType;
@@ -214,6 +235,10 @@ class GameScene extends Phaser.Scene {
                 
                 // Handle turning and movement based on unit type
                 if (unitType !== 'INFANTRY' && data.turnDuration > 0) {
+                    // Log that we're starting a turn
+                    console.log(`unitMoved: Unit ${data.id} starting turn, duration: ${data.turnDuration}ms`);
+                    unit.setVisible(true); // Ensure unit is visible
+                    
                     this.tweens.add({
                         targets: unit,
                         angle: data.facing,
@@ -222,6 +247,8 @@ class GameScene extends Phaser.Scene {
                         onComplete: () => {
                             unit.setData('facing', data.facing);
                             unit.setFillStyle(originalColor); // Restore color after rotation
+                            console.log(`unitMoved: Unit ${data.id} completed turn, starting movement`);
+                            unit.setVisible(true); // Ensure unit is visible after turn
                             
                             this.tweens.add({
                                 targets: unit,
@@ -232,11 +259,16 @@ class GameScene extends Phaser.Scene {
                                 onStart: () => {
                                     // Make sure color is correct at tween start
                                     unit.setFillStyle(originalColor);
+                                    unit.setVisible(true); // Ensure unit is visible at start of movement
                                 },
                                 onComplete: () => {
+                                    // Update unit position data
                                     unit.setData('gridX', data.x);
                                     unit.setData('gridY', data.y);
                                     unit.setFillStyle(originalColor); // Restore color
+                                    unit.setVisible(true); // Ensure unit is visible after movement
+                                    console.log(`unitMoved: Unit ${data.id} completed movement to (${data.x},${data.y})`);
+                                    
                                     if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
                                         this.map[data.x][data.y].setData('occupied', true);
                                     }
@@ -249,6 +281,8 @@ class GameScene extends Phaser.Scene {
                     unit.setAngle(data.facing);
                     unit.setData('facing', data.facing);
                     unit.setFillStyle(originalColor); // Ensure color is correct
+                    unit.setVisible(true); // Ensure unit is visible
+                    console.log(`unitMoved: Unit ${data.id} starting direct movement, duration: ${data.duration}ms`);
                     
                     this.tweens.add({
                         targets: unit,
@@ -259,11 +293,16 @@ class GameScene extends Phaser.Scene {
                         onStart: () => {
                             // Make sure color is correct at tween start
                             unit.setFillStyle(originalColor);
+                            unit.setVisible(true); // Ensure unit is visible at start of movement
                         },
                         onComplete: () => {
+                            // Update unit position data
                             unit.setData('gridX', data.x);
                             unit.setData('gridY', data.y);
                             unit.setFillStyle(originalColor); // Restore color
+                            unit.setVisible(true); // Ensure unit is visible after movement
+                            console.log(`unitMoved: Unit ${data.id} completed direct movement to (${data.x},${data.y})`);
+                            
                             if (data.x >= 0 && data.x < GRID_SIZE && data.y >= 0 && data.y < GRID_SIZE) {
                                 this.map[data.x][data.y].setData('occupied', true);
                             }
@@ -304,14 +343,19 @@ class GameScene extends Phaser.Scene {
             COLORS[type]
         );
         
+        // Generate a truly unique ID with type prefix and timestamp
+        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        
         unit.setStrokeStyle(1, 0x000000);
         unit.setInteractive();
         unit.setData('type', 'UNIT');
         unit.setData('unitType', type);
-        unit.setData('id', Date.now().toString());
+        unit.setData('id', uniqueId);
         unit.setData('originalColor', COLORS[type]); // Store original color in data
         unit.setData('facing', FacingDirection.NORTH); // Set initial facing
         unit.setAngle(FacingDirection.NORTH); // Set initial angle
+        unit.setData('gridX', gridX); // Set initial grid position
+        unit.setData('gridY', gridY); // Set initial grid position
         
         const stats = UNIT_STATS[type];
         unit.setData('health', stats.health);
@@ -327,7 +371,10 @@ class GameScene extends Phaser.Scene {
         // Mark the tile as occupied
         this.map[gridX][gridY].setData('occupied', true);
         
-        console.log(`Client: Created unit ${type} with ID ${unit.getData('id')} and color ${COLORS[type].toString(16)}`); // Debug
+        // Add unit to tracking array
+        this.units.push(unit);
+        
+        console.log(`Client: Created unit ${type} with ID ${uniqueId} and color ${COLORS[type].toString(16)}`); // Debug
         return unit;
     }
 
@@ -391,14 +438,19 @@ class GameScene extends Phaser.Scene {
             turnDuration = MIN_DURATION;
         }
         
-        // Mark current position as unoccupied
-        if (this.map[currentX] && this.map[currentX][currentY]) {
+        // Only unset occupied if current position is valid
+        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
             this.map[currentX][currentY].setData('occupied', false);
         }
         
-        // Mark target position as occupied
-        if (this.map[x] && this.map[x][y]) {
-            this.map[x][y].setData('occupied', true);
+        // Only set occupied if target is valid and not already occupied by another unit
+        if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+            const alreadyOccupied = this.units.some(u => 
+                u !== unit && u.getData('gridX') === x && u.getData('gridY') === y
+            );
+            if (!alreadyOccupied) {
+                this.map[x][y].setData('occupied', true);
+            }
         }
         
         // Emit move event for multiplayer
@@ -439,6 +491,7 @@ class GameScene extends Phaser.Scene {
         
         // Get the original color
         const originalColor = unit.getData('originalColor') || unit.fillColor;
+        console.log(`performMove: Unit ${unit.getData('id')} original color: ${originalColor.toString(16)} moving to (${x},${y})`);
         
         // Ensure unit has the right color before starting movement
         unit.setFillStyle(originalColor);
@@ -452,12 +505,20 @@ class GameScene extends Phaser.Scene {
             onStart: () => {
                 // Make sure color is correct at tween start
                 unit.setFillStyle(originalColor);
+                console.log(`performMove onStart: Unit ${unit.getData('id')} color: ${originalColor.toString(16)}`);
             },
             onComplete: () => {
+                // Update unit's internal position data
                 unit.setData('gridX', x);
                 unit.setData('gridY', y);
-                unit.setFillStyle(originalColor); // Restore original color
-                console.log(`Client performMove: Unit ${unit.getData('id')} color after move: ${originalColor.toString(16)}`);
+                
+                // Restore original color
+                unit.setFillStyle(originalColor);
+                
+                // Make unit visible if it somehow became invisible
+                unit.setVisible(true);
+                
+                console.log(`Client performMove complete: Unit ${unit.getData('id')} at (${x},${y}) color: ${originalColor.toString(16)}`);
             }
         });
     }
@@ -492,6 +553,14 @@ class GameScene extends Phaser.Scene {
     handleResize() {
         // Implement the logic to handle resizing the game scene
         console.log('GameScene handleResize called');
+    }
+
+    update() {
+        // Filter out destroyed or dead units
+        this.units = this.units.filter(unit => {
+            const health = unit.getData('health');
+            return unit.active && health !== undefined && health > 0;
+        });
     }
 }
 
