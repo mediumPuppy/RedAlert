@@ -339,3 +339,8 @@ Port Original Logic: Adapt RedAlert.dll code for combat (target.health -= attack
 
 Timing: Mimic the original’s speed by adjusting Phaser tweens to match 1996 frame rates (e.g., tweak duration in moveUnit to 500ms or test against old gameplay videos).
 Map: Use the original’s map data (from .mix files) to recreate layouts instead of random generation.
+
+
+## problems
+1. fix resizing of the game to not scrunch screen
+2. 
