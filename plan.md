@@ -8,20 +8,20 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
 
 **Goal**: Understand Red Alert’s core mechanics to replicate its essence in a modern context.
 
-**Key Files to Study**:
-- `CONQUER.CPP` / `CONQUER.H`: Main game loop, map handling, and multiplayer session setup (e.g., CD detection logic inspires our lobby system).
-- `AIRCRAFT.CPP`, `INFANTRY.CPP`, `UNIT.CPP`: Unit behaviors (movement, combat) to translate into JavaScript.
-- `HOUSE.CPP`: Faction mechanics (Allies vs. Soviets) for multiplayer team assignments.
-- `RULES.CPP`: Game rules (e.g., resource costs, unit stats) to adapt numerically.
-- `PATHS.CPP`: Pathfinding logic for unit movement on a grid-based map.
+~~**Key Files to Study**:~~
+~~- `CONQUER.CPP` / `CONQUER.H`: Main game loop, map handling, and multiplayer session setup (e.g., CD detection logic inspires our lobby system).~~
+~~- `AIRCRAFT.CPP`, `INFANTRY.CPP`, `UNIT.CPP`: Unit behaviors (movement, combat) to translate into JavaScript.~~
+~~- `HOUSE.CPP`: Faction mechanics (Allies vs. Soviets) for multiplayer team assignments.~~
+~~- `RULES.CPP`: Game rules (e.g., resource costs, unit stats) to adapt numerically.~~
+~~- `PATHS.CPP`: Pathfinding logic for unit movement on a grid-based map.~~
 
-**Why**: These files reveal Westwood Studios’ approach to gameplay, unit management, and multiplayer structure. We won’t use the C++ code directly but will mimic its logic in JavaScript.
+~~**Why**: These files reveal Westwood Studios’ approach to gameplay, unit management, and multiplayer structure. We won’t use the C++ code directly but will mimic ~~~~its logic in JavaScript.~~
 
-**Tasks**:
-- Review each file to identify key systems (e.g., how units move, how combat resolves, how resources work).
-- Document unit types (e.g., tanks, infantry), combat flow (e.g., damage formulas), and resource systems (e.g., ore collection).
+~~**Tasks**:~~
+~~- Review each file to identify key systems (e.g., how units move, how combat resolves, how resources work).~~
+~~- Document unit types (e.g., tanks, infantry), combat flow (e.g., damage formulas), and resource systems (e.g., ore collection).~~
 
-**Output**: Concise notes on unit behaviors, combat mechanics, resource management, and multiplayer concepts to guide development.
+~~**Output**: Concise notes on unit behaviors, combat mechanics, resource management, and multiplayer concepts to guide development.~~
 
 ---
 
@@ -42,22 +42,20 @@ Below is a complete, detailed plan for rebuilding a Red Alert-inspired real-time
 - **AWS CLI Setup**:
   - ~~Install AWS CLI: `pip install awscli` (requires Python).~~
   - ~~Configure credentials: `aws configure` (use your AWS free-tier access key, secret key, region, e.g., `us-east-1`).~~
-  - Launch an EC2 instance:
-    ```bash
-    aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name MyKeyPair --security-groups my-sg
-    ```
-    - Replace `ami-0c55b159cbfafe1f0` with a current Ubuntu 20.04 AMI for your region.
-    - Ensure `MyKeyPair` exists (create via AWS Console if needed) and `my-sg` allows SSH (port 22).
-  - SSH into the instance:
-    ```bash
-    ssh -i MyKeyPair.pem ubuntu@<ec2-public-ip>
-    ```
+  - ~~Launch an EC2 instance:~~
+    ~~```bash~~
+    ~~aws ec2 run-instances --image-id ami-0c55b159cbfafe1f0 --count 1 --instance-type t2.micro --key-name MyKeyPair --security-groups my-sg~~
+    ~~```~~
+    ~~- Replace `ami-0c55b159cbfafe1f0` with a current Ubuntu 20.04 AMI for your region.~~
+   ~~ - Ensure `MyKeyPair` exists (create via AWS Console if needed) and `my-sg` allows SSH (port 22).~~
+  - ~~SSH into the instance:~~
+    ~~```bash~~
+   ~~ ssh -i MyKeyPair.pem ubuntu@<ec2-public-ip>~~
+    ~~```~~
 
-**Why**: The local setup enables rapid prototyping, while the free-tier EC2 t2.micro instance provides a scalable host for the Node.js server.
+~~**Why**: The local setup enables rapid prototyping, while the free-tier EC2 t2.micro instance provides a scalable host for the Node.js server.~~~~
 
-**Output**: A fully configured local development environment and a running EC2 instance ready for deployment.
-
----home@linux-new-big redalert % aws ect run-instances --image-id ami-010af6e897f3ad567 --count 1 --instance-type t2.micro --key-name 
+~~**Output**: A fully configured local development environment and a running EC2 instance ready for deployment.~~
 
 ### **Step 3: Build Core Gameplay**
 
