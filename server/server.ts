@@ -103,6 +103,22 @@ io.on('connection', (socket) => {
     console.log(`Player ${socket.id} reconnected to game ${existingGameId}`);
   }
 
+  // Allow clients to request current game state (for tab refocus sync)
+  socket.on('requestGameState', (gameId: string) => {
+    const game = games[gameId];
+    if (game) {
+      console.log(`Sending game state to ${socket.id} for game ${gameId}`);
+      socket.emit('gameState', { 
+        gameId, 
+        players: game.players, 
+        units: game.units 
+      });
+    } else {
+      console.warn(`Game ${gameId} not found for ${socket.id}`);
+      socket.emit('gameError', { message: 'Game not found' });
+    }
+  });
+
   // Join matchmaking queue
   socket.on('joinMatchmaking', (data = {}) => {
     const mode = data.mode || 'multiplayer';

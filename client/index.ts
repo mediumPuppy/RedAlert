@@ -182,6 +182,7 @@ class GameScene extends Phaser.Scene {
             if (this.initialized) {
                 this.inLobby = false;
                 this.startGame(data);
+                waitingText.destroy();
             } else {
                 this.pendingGameStart = data;
             }
@@ -206,8 +207,13 @@ class GameScene extends Phaser.Scene {
                 gameIdText.setText(`Game ID: ${data.gameId}`);
                 if (!this.inLobby) waitingText.destroy();
             } else {
-                this.pendingGameStart = data; // Use gameStart for consistency if not initialized
+                this.pendingGameStart = data;
             }
+        });
+
+        socket.on('gameError', ({ message }: { message: string }) => {
+            console.log(`Game error: ${message}`);
+            this.scene.start('MainMenu');
         });
 
         socket.on('disconnect', () => {
@@ -220,6 +226,15 @@ class GameScene extends Phaser.Scene {
                     backgroundColor: '#ff0000', padding: { x: 20, y: 10 }
                 }).setOrigin(0.5);
                 this.time.delayedCall(2000, () => this.scene.start('MainMenu'));
+            }
+        });
+
+        // Handle tab focus to sync state
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.gameId && !this.inLobby) {
+                console.log(`Tab refocused, requesting game state for ${this.gameId}`);
+                this.tweens.killAll(); // Clear all pending tweens
+                socket.emit('requestGameState', this.gameId);
             }
         });
 
@@ -243,6 +258,7 @@ class GameScene extends Phaser.Scene {
             console.log('Processing pending gameStart', this.pendingGameStart);
             this.inLobby = false;
             this.startGame(this.pendingGameStart);
+            waitingText.destroy();
             this.pendingGameStart = null;
         }
 
@@ -409,6 +425,12 @@ class GameScene extends Phaser.Scene {
     }
 
     private handleRemoteUnitMovement(data: UnitMovedData) {
+        // Only process unit movements if the tab is active
+        if (document.hidden) {
+            console.log(`Tab is hidden, skipping animation for unit ${data.id}`);
+            return;
+        }
+
         // Find the unit by ID
         const unit = this.units.find(u => u.getData('id') === data.id);
         
@@ -1235,6 +1257,10 @@ class GameScene extends Phaser.Scene {
         units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }> 
     }) {
         this.gameId = data.gameId;
+        
+        // Kill all tweens to prevent animation queue from playing out
+        this.tweens.killAll();
+        
         if (this.inLobby) {
             this.showLobbyUI(data.players);
         } else {
