@@ -40,6 +40,9 @@ interface MoveUnitData {
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
+  // Send map size to new clients
+  socket.emit('mapSize', { width: 128, height: 128 });
+
   // Listen for unit movement from a client with enhanced data
   socket.on('moveUnit', (data: MoveUnitData) => {
     console.log(`Server received: Unit ${data.id} moved to (${data.x}, ${data.y}) facing ${data.facing || 'undefined'} (duration: ${data.duration}, turnDuration: ${data.turnDuration})`);

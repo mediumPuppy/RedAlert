@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType, FacingDirection, TERRAIN_SPEED_MODIFIERS } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from '../constants';
 
 // Declare socket for multiplayer
 declare const socket: any;
@@ -11,6 +11,8 @@ export class GameScene extends Scene {
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
     private resourceText!: Phaser.GameObjects.Text;
+    private minimap!: Phaser.GameObjects.Graphics; // Minimap graphics object
+    private minimapScale: number = 0.1; // 10% of full map size
 
     constructor() {
         super({ key: 'GameScene' });
@@ -21,12 +23,23 @@ export class GameScene extends Scene {
         this.createInitialUnits();
         this.createUI();
         this.setupInput();
+        
+        // Set up camera for large map
+        this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        this.cameras.main.setViewport(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        // Start camera at center of map
+        this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
+        this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
+        
+        // Create minimap (inspired by RADAR.CPP)
+        this.minimap = this.add.graphics({ x: GAME_WIDTH - MAP_SIZE * this.minimapScale - 10, y: GAME_HEIGHT - MAP_SIZE * this.minimapScale - 10 });
+        this.updateMinimap();
     }
 
     private createMap() {
-        for (let x = 0; x < GRID_SIZE; x++) {
+        for (let x = 0; x < MAP_SIZE; x++) {
             this.map[x] = [];
-            for (let y = 0; y < GRID_SIZE; y++) {
+            for (let y = 0; y < MAP_SIZE; y++) {
                 const tileType: TileType = Math.random() < 0.1 ? 'WATER' :
                     Math.random() < 0.15 ? 'ORE' : 'GRASS';
                 const tile = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, COLORS[tileType]);
@@ -69,10 +82,33 @@ export class GameScene extends Scene {
         });
 
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            // Check if click is on minimap
+            const minimapX = GAME_WIDTH - MAP_SIZE * this.minimapScale - 10;
+            const minimapY = GAME_HEIGHT - MAP_SIZE * this.minimapScale - 10;
+            const minimapWidth = MAP_SIZE * this.minimapScale;
+            const minimapHeight = MAP_SIZE * this.minimapScale;
+            
+            if (pointer.x >= minimapX && pointer.x <= minimapX + minimapWidth &&
+                pointer.y >= minimapY && pointer.y <= minimapY + minimapHeight) {
+                // Clicked on minimap - move camera to this location
+                const relativeX = (pointer.x - minimapX) / minimapWidth;
+                const relativeY = (pointer.y - minimapY) / minimapHeight;
+                
+                // Calculate target camera position (center on the clicked point)
+                const targetX = relativeX * MAP_WIDTH - GAME_WIDTH / 2;
+                const targetY = relativeY * MAP_HEIGHT - GAME_HEIGHT / 2;
+                
+                // Bound camera position within map bounds
+                this.cameras.main.scrollX = Math.max(0, Math.min(MAP_WIDTH - GAME_WIDTH, targetX));
+                this.cameras.main.scrollY = Math.max(0, Math.min(MAP_HEIGHT - GAME_HEIGHT, targetY));
+                return; // Don't process as a regular map click
+            }
+            
+            // Regular map click for unit movement
             if (!this.selectedUnit) return;
             const scaleFactor = this.getScaleFactor();
-            const x = Math.floor((pointer.x / scaleFactor) / TILE_SIZE);
-            const y = Math.floor((pointer.y / scaleFactor) / TILE_SIZE);
+            const x = Math.floor((pointer.x / scaleFactor + this.cameras.main.scrollX) / TILE_SIZE);
+            const y = Math.floor((pointer.y / scaleFactor + this.cameras.main.scrollY) / TILE_SIZE);
             if (this.isValidMove(x, y)) {
                 const tile = this.map[x][y];
                 if (this.selectedUnit.getData('unitType') === 'HARVESTER' && tile.getData('type') === 'ORE') {
@@ -89,6 +125,28 @@ export class GameScene extends Scene {
             const health = unit.getData('health');
             return health !== undefined && health > 0;
         });
+        
+        // Scroll based on mouse position (inspired by SCROLL.CPP)
+        const pointer = this.input.activePointer;
+        const cam = this.cameras.main;
+        const edgeSize = 50; // Pixels from edge to trigger scrolling
+
+        if (pointer.isDown || pointer.active) {
+            if (pointer.x < edgeSize && cam.scrollX > 0) {
+                cam.scrollX -= SCROLL_SPEED;
+            } else if (pointer.x > GAME_WIDTH - edgeSize && cam.scrollX < MAP_WIDTH - GAME_WIDTH) {
+                cam.scrollX += SCROLL_SPEED;
+            }
+            if (pointer.y < edgeSize && cam.scrollY > 0) {
+                cam.scrollY -= SCROLL_SPEED;
+            } else if (pointer.y > GAME_HEIGHT - edgeSize && cam.scrollY < MAP_HEIGHT - GAME_HEIGHT) {
+                cam.scrollY += SCROLL_SPEED;
+            }
+        }
+
+        this.updateMapPositions(); // Update visible tiles
+        this.updateUnitPositions(); // Update unit positions relative to camera
+        this.updateMinimap(); // Update minimap each frame
     }
 
     private getScaleFactor(): number {
@@ -124,8 +182,18 @@ export class GameScene extends Scene {
 
     private updateMapPositions() {
         const scaleFactor = this.getScaleFactor();
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
+        const cam = this.cameras.main; // Get the main camera
+        const camX = cam.scrollX; // Camera's X offset
+        const camY = cam.scrollY; // Camera's Y offset
+
+        // Only position tiles within or near the viewport for performance
+        const startX = Math.max(0, Math.floor(camX / TILE_SIZE));
+        const startY = Math.max(0, Math.floor(camY / TILE_SIZE));
+        const endX = Math.min(MAP_SIZE, startX + GRID_SIZE + 1);
+        const endY = Math.min(MAP_SIZE, startY + GRID_SIZE + 1);
+
+        for (let x = startX; x < endX; x++) {
+            for (let y = startY; y < endY; y++) {
                 const tile = this.map[x][y];
                 tile.setPosition(
                     (x * TILE_SIZE + TILE_SIZE/2) * scaleFactor,
@@ -170,7 +238,7 @@ export class GameScene extends Scene {
     }
 
     private isValidMove(x: number, y: number): boolean {
-        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return false;
+        if (x < 0 || x >= MAP_SIZE || y < 0 || y >= MAP_SIZE) return false;
         if (this.map[x][y].getData('type') === 'WATER') return false;
         
         // Check if position is occupied by another unit
@@ -248,12 +316,12 @@ export class GameScene extends Scene {
         }
         
         // Only unset occupied if current position is valid
-        if (currentX >= 0 && currentX < GRID_SIZE && currentY >= 0 && currentY < GRID_SIZE) {
+        if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
             this.map[currentX][currentY].setData('occupied', false);
         }
         
         // Only set occupied if target is valid and not already occupied by another unit
-        if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+        if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
             const alreadyOccupied = this.units.some(u => 
                 u !== unit && u.getData('gridX') === x && u.getData('gridY') === y
             );
@@ -370,5 +438,41 @@ export class GameScene extends Scene {
         const originalColor = oreTile.fillColor;
         oreTile.setFillStyle(0xffffff);
         this.time.delayedCall(200, () => oreTile.setFillStyle(originalColor));
+    }
+
+    private updateMinimap() {
+        this.minimap.clear();
+
+        // Draw full map background (scaled down)
+        this.minimap.fillStyle(0x333333, 1); // Gray background
+        this.minimap.fillRect(0, 0, MAP_SIZE * this.minimapScale, MAP_SIZE * this.minimapScale);
+
+        // Draw tiles
+        for (let x = 0; x < MAP_SIZE; x++) {
+            for (let y = 0; y < MAP_SIZE; y++) {
+                const tile = this.map[x][y];
+                const tileType = tile.getData('type') as TileType;
+                this.minimap.fillStyle(COLORS[tileType], 0.7);
+                this.minimap.fillRect(x * this.minimapScale, y * this.minimapScale, this.minimapScale, this.minimapScale);
+            }
+        }
+
+        // Draw units
+        this.units.forEach(unit => {
+            const unitType = unit.getData('unitType') as UnitType;
+            const gridX = unit.getData('gridX');
+            const gridY = unit.getData('gridY');
+            this.minimap.fillStyle(COLORS[unitType], 1);
+            this.minimap.fillRect(gridX * this.minimapScale, gridY * this.minimapScale, this.minimapScale * 2, this.minimapScale * 2);
+        });
+
+        // Draw viewport rectangle
+        const cam = this.cameras.main;
+        const viewX = cam.scrollX / TILE_SIZE * this.minimapScale;
+        const viewY = cam.scrollY / TILE_SIZE * this.minimapScale;
+        const viewWidth = GRID_SIZE * this.minimapScale;
+        const viewHeight = GRID_SIZE * this.minimapScale;
+        this.minimap.lineStyle(2, 0xffffff, 1);
+        this.minimap.strokeRect(viewX, viewY, viewWidth, viewHeight);
     }
 }
