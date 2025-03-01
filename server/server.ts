@@ -64,12 +64,19 @@ interface Unit {
   };
 }
 
+interface BotState {
+  lastMoveTime: number;
+  targetUnit?: string;
+  targetResource?: { x: number; y: number };
+}
+
 interface Game {
   id: string;
   players: Player[];
   mapSize: number;
   state: 'LOBBY' | 'RUNNING' | 'ENDED';
   units: Record<string, Unit>;
+  bots?: Record<string, BotState>;
 }
 
 interface MoveUnitData {
@@ -179,19 +186,25 @@ io.on('connection', (socket) => {
   // Helper function to create a game with the given players
   function createGame(gamePlayers: string[], singlePlayer: boolean) {
     const gameId = `game_${Date.now()}`;
-    const initialUnits: Record<string, any> = {};
+    const initialUnits: Record<string, Unit> = {};
+
+    // Define players, adding bot for single-player
+    const players = singlePlayer
+      ? [...gamePlayers.map(id => ({ id, team: 'ALLIES', ready: true })), { id: 'BOT_1', team: 'SOVIETS', ready: true }]
+      : gamePlayers.map(id => ({ id, team: null, ready: false }));
 
     games[gameId] = {
       id: gameId,
-      players: gamePlayers.map(id => ({ id, team: null, ready: false })),
+      players,
       mapSize: MAP_SIZE,
       state: singlePlayer ? 'RUNNING' : 'LOBBY',
-      units: initialUnits
+      units: initialUnits,
+      bots: {} // Initialize bots object
     };
 
-    // Create initial units for each player
+    // Create initial units for human players
     gamePlayers.forEach((playerId, i) => {
-      const startX = i * 5 + 2; // Spread players out
+      const startX = i * 5 + 2;
       initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
       initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
       initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
@@ -199,19 +212,24 @@ io.on('connection', (socket) => {
       if (playerSocket) {
         playerSocket.join(gameId);
         console.log(`Player ${playerId} joined room ${gameId}`);
-      } else {
-        console.warn(`Socket for player ${playerId} not found`);
       }
     });
 
-    console.log(`Emitting gameCreated to ${gameId} with ${gamePlayers.length} players`);
-    io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
-    console.log(`Emitting gameState to ${gameId}`);
-    io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
-
+    // Add bot units for single-player
     if (singlePlayer) {
-      console.log(`Emitting gameStart to ${gameId} for single-player`);
+      const botId = 'BOT_1';
+      const botStartX = MAP_SIZE - 10; // Opposite side of map
+      initialUnits[`TANK_${botId}`] = { x: botStartX, y: MAP_SIZE - 3, facing: 180, type: 'TANK', owner: botId };
+      initialUnits[`INFANTRY_${botId}`] = { x: botStartX + 1, y: MAP_SIZE - 3, facing: 180, type: 'INFANTRY', owner: botId };
+      initialUnits[`HARVESTER_${botId}`] = { x: botStartX + 2, y: MAP_SIZE - 3, facing: 180, type: 'HARVESTER', owner: botId };
+    }
+
+    io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
+    io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
+    
+    if (singlePlayer) {
       io.to(gameId).emit('gameStart', { gameId, players: games[gameId].players, units: games[gameId].units });
+      startBot(gameId, 'BOT_1'); // Start bot behavior
     }
 
     console.log(`Game ${gameId} created with ${gamePlayers.length} players (${singlePlayer ? 'Single-player' : 'Multiplayer'})`);
@@ -330,6 +348,127 @@ io.on('connection', (socket) => {
     console.log(`Player disconnected: ${socket.id}`);
   });
 });
+
+// Add bot-related functions
+function startBot(gameId: string, botId: string) {
+  console.log(`Starting bot ${botId} in game ${gameId}`);
+  
+  const game = games[gameId];
+  if (!game) {
+    console.error(`Game ${gameId} not found`);
+    return;
+  }
+
+  // Initialize bot state
+  if (!game.bots) {
+    game.bots = {};
+  }
+  game.bots[botId] = {
+    lastMoveTime: Date.now(),
+  };
+
+  // Run bot logic every 3 seconds
+  const botInterval = setInterval(() => {
+    const game = games[gameId];
+    if (!game || game.state !== 'RUNNING' || !game.bots) {
+      clearInterval(botInterval);
+      return;
+    }
+
+    const now = Date.now();
+    const botState = game.bots[botId];
+    if (now - botState.lastMoveTime < 3000) {
+      return; // Wait for cooldown
+    }
+
+    const botUnits = Object.entries(game.units).filter(([_, unit]) => unit.owner === botId);
+    const playerUnits = Object.entries(game.units).filter(([_, unit]) => unit.owner !== botId);
+
+    botUnits.forEach(([unitId, unit]) => {
+      // Skip if unit is already moving
+      if (unit.lastMove && (now - unit.lastMove.timestamp) < (unit.lastMove.duration + unit.lastMove.turnDuration)) {
+        return;
+      }
+
+      let targetX: number, targetY: number;
+      const MIN_DISTANCE = 3; // Don't move if too close to target
+
+      if (unit.type === 'HARVESTER') {
+        // Harvesters prioritize finding ore
+        // For now, just move randomly as we don't have ore positions
+        targetX = Math.max(0, Math.min(MAP_SIZE - 1, unit.x + (Math.random() > 0.5 ? 2 : -2)));
+        targetY = Math.max(0, Math.min(MAP_SIZE - 1, unit.y + (Math.random() > 0.5 ? 2 : -2)));
+      } else {
+        // Combat units move toward nearest player unit
+        if (playerUnits.length > 0) {
+          const nearestPlayerUnit = playerUnits.reduce((prev, curr) => {
+            const [_, prevUnit] = prev;
+            const [__, currUnit] = curr;
+            const prevDist = Math.hypot(prevUnit.x - unit.x, prevUnit.y - unit.y);
+            const currDist = Math.hypot(currUnit.x - unit.x, currUnit.y - unit.y);
+            return prevDist < currDist ? prev : curr;
+          });
+
+          const [_, targetUnit] = nearestPlayerUnit;
+          const distance = Math.hypot(targetUnit.x - unit.x, targetUnit.y - unit.y);
+
+          if (distance > MIN_DISTANCE) {
+            // Move toward player unit with some randomness
+            const dx = targetUnit.x - unit.x;
+            const dy = targetUnit.y - unit.y;
+            const angle = Math.atan2(dy, dx);
+            const moveDistance = 2;
+            targetX = Math.max(0, Math.min(MAP_SIZE - 1, 
+              unit.x + Math.round(Math.cos(angle) * moveDistance + (Math.random() - 0.5))));
+            targetY = Math.max(0, Math.min(MAP_SIZE - 1, 
+              unit.y + Math.round(Math.sin(angle) * moveDistance + (Math.random() - 0.5))));
+          } else {
+            // Too close to target, move randomly
+            targetX = Math.max(0, Math.min(MAP_SIZE - 1, unit.x + (Math.random() > 0.5 ? 2 : -2)));
+            targetY = Math.max(0, Math.min(MAP_SIZE - 1, unit.y + (Math.random() > 0.5 ? 2 : -2)));
+          }
+        } else {
+          // No player units visible, move randomly
+          targetX = Math.max(0, Math.min(MAP_SIZE - 1, unit.x + (Math.random() > 0.5 ? 2 : -2)));
+          targetY = Math.max(0, Math.min(MAP_SIZE - 1, unit.y + (Math.random() > 0.5 ? 2 : -2)));
+        }
+      }
+
+      // Validate move (avoid occupied tiles)
+      if (!Object.values(game.units).some(u => u.x === targetX && u.y === targetY)) {
+        const facing = Math.atan2(targetY - unit.y, targetX - unit.x) * 180 / Math.PI;
+        
+        // Store last move
+        unit.lastMove = {
+          x: unit.x,
+          y: unit.y,
+          facing: unit.facing,
+          timestamp: now,
+          duration: 1000, // Fixed duration for bot moves
+          turnDuration: 500
+        };
+
+        // Update position
+        unit.x = targetX;
+        unit.y = targetY;
+        unit.facing = facing;
+
+        // Emit move event
+        io.to(gameId).emit('unitMoved', {
+          id: unitId,
+          x: targetX,
+          y: targetY,
+          facing,
+          duration: 1000,
+          turnDuration: 500,
+          timestamp: now
+        });
+
+        botState.lastMoveTime = now;
+      }
+    });
+  }, 1000); // Check every second, but only move every 3 seconds
+}
 
 // Start the server on port 3000
 const PORT = 3000;
