@@ -449,8 +449,12 @@ class GameScene extends Phaser.Scene {
             return;
         }
 
-        // Find the unit by ID
-        const unit = this.units.find(u => u.getData('id') === data.id);
+        // Find the unit by ID, considering both server and client ID formats
+        const unit = this.units.find(u => {
+            const unitId = u.getData('id');
+            return unitId === data.id || // Exact match
+                   (unitId && unitId.startsWith(data.id.split('_')[0]) && u.getData('owner') === data.id.split('_')[1]); // Type + owner match
+        });
         
         if (unit) {
             const unitType = unit.getData('unitType') as UnitType;
@@ -573,8 +577,8 @@ class GameScene extends Phaser.Scene {
             COLORS[type]
         );
         
-        // Generate a truly unique ID with type prefix and timestamp
-        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        // Use a simpler ID format that matches server's format
+        const uniqueId = `${type}_${socket.id}`;
         
         unit.setStrokeStyle(1, 0x000000);
         unit.setInteractive();
@@ -1306,14 +1310,19 @@ class GameScene extends Phaser.Scene {
         const updatedUnits = new Set<string>();
         
         Object.entries(data.units).forEach(([id, unitData]) => {
-            let unit = this.units.find(u => u.getData('id') === id);
+            // Try to find unit by server ID first, then by client-generated ID
+            let unit = this.units.find(u => {
+                const unitId = u.getData('id');
+                return unitId === id || // Exact match
+                       (unitId && unitId.startsWith(`${unitData.type}_`) && u.getData('owner') === unitData.owner); // Type + owner match
+            });
             const isNewUnit = !unit;
             
             if (!unit) {
                 // Create new unit if it doesn't exist
                 console.log(`Creating new unit ${unitData.type} with ID ${id}`);
                 unit = this.createUnit(unitData.type as UnitType, unitData.x, unitData.y);
-                unit.setData('id', id);
+                unit.setData('id', id); // Use server's ID
                 unit.setData('owner', unitData.owner);
                 if (unitData.owner === socket.id) {
                     unit.setData('selectable', true);
