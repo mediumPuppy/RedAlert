@@ -116,6 +116,7 @@ class GameScene extends Phaser.Scene {
     private mode: string | null = null;
     private lastStateUpdate: number = 0; // Track last state update time
     private readonly STATE_UPDATE_DEBOUNCE = 250; // Debounce state updates (ms)
+    private lastSynced: number = 0; // Track last state sync timestamp
 
     constructor() {
         super('GameScene');
@@ -190,28 +191,39 @@ class GameScene extends Phaser.Scene {
             }
         });
 
-        socket.on('unitMoved', (data: UnitMovedData) => {
+        socket.on('unitMoved', (data: UnitMovedData & { timestamp?: number }) => {
             if (!this.inLobby && this.initialized) {
-                console.log(`Unit moved: ${data.id} to (${data.x}, ${data.y})`);
-                this.handleRemoteUnitMovement(data);
+                // Skip stale movement events
+                if (data.timestamp && data.timestamp <= this.lastSynced) {
+                    console.log(`Skipping outdated unitMoved for ${data.id} (timestamp ${data.timestamp} <= lastSynced ${this.lastSynced})`);
+                    return;
+                }
+                // Only process movement if tab is active
+                if (!document.hidden) {
+                    console.log(`Unit moved: ${data.id} to (${data.x}, ${data.y})`);
+                    this.handleRemoteUnitMovement(data);
+                }
             }
         });
 
         socket.on('gameState', (data: { 
             gameId: string, 
             players: { id: string, team: string | null, ready: boolean }[], 
-            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
+            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string; lastMove?: { x: number; y: number; facing: number; timestamp: number; duration: number; turnDuration: number } }> 
         }) => {
             console.log('Received gameState event', data);
             if (this.initialized) {
                 this.gameId = data.gameId;
                 const now = Date.now();
-                if (now - this.lastStateUpdate >= this.STATE_UPDATE_DEBOUNCE) { // Debounce to avoid spamming
-                    this.handleGameState(data);
+                if (now - this.lastStateUpdate >= this.STATE_UPDATE_DEBOUNCE) {
+                    // Pass document.hidden as isRefocus to handleGameState
+                    this.handleGameState(data, document.hidden);
                     this.lastStateUpdate = now;
+                    this.lastSynced = now; // Update sync timestamp
                 }
-                gameIdText.setText(`Game ID: ${data.gameId}`);
-                if (!this.inLobby) waitingText.destroy();
+                if (!this.inLobby) {
+                    this.updateGameIdText(data.gameId);
+                }
             } else {
                 this.pendingGameStart = data;
             }
@@ -239,6 +251,7 @@ class GameScene extends Phaser.Scene {
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && this.gameId && !this.inLobby) {
                 console.log(`Tab refocused, requesting game state for ${this.gameId}`);
+                this.tweens.killAll(); // Clear all queued tweens
                 socket.emit('requestGameState', this.gameId);
             }
         });
@@ -462,7 +475,7 @@ class GameScene extends Phaser.Scene {
             const targetX = data.x * TILE_SIZE + TILE_SIZE/2;
             const targetY = data.y * TILE_SIZE + TILE_SIZE/2;
             
-            // Prevent overlap with state sync
+            // Kill any existing tweens for this unit
             this.tweens.killTweensOf(unit);
             
             // Handle turning and movement based on unit type
@@ -1275,7 +1288,7 @@ class GameScene extends Phaser.Scene {
                 turnDuration: number;
             };
         }> 
-    }) {
+    }, isRefocus: boolean = false) {
         this.gameId = data.gameId;
         
         if (this.inLobby) {
@@ -1314,9 +1327,27 @@ class GameScene extends Phaser.Scene {
             if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
                 this.map[currentX][currentY].setData('occupied', false);
             }
-            
-            // Handle unit motion based on lastMove data
-            if (unitData.lastMove && (isNewUnit || currentX !== unitData.x || currentY !== unitData.y)) {
+
+            const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
+            const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
+            const originalColor = unit.getData('originalColor') || COLORS[unitData.type as UnitType];
+
+            // Kill any existing tweens for this unit
+            this.tweens.killTweensOf(unit);
+
+            if (isRefocus) {
+                // On tab refocus, instantly set position without animation
+                unit.setPosition(targetX, targetY);
+                unit.setAngle(unitData.facing);
+                unit.setData('gridX', unitData.x);
+                unit.setData('gridY', unitData.y);
+                unit.setData('facing', unitData.facing);
+                unit.setFillStyle(originalColor);
+                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                    this.map[unitData.x][unitData.y].setData('occupied', true);
+                }
+            } else if (unitData.lastMove && (isNewUnit || currentX !== unitData.x || currentY !== unitData.y)) {
                 const lastMove = unitData.lastMove;
                 const elapsed = now - lastMove.timestamp;
                 const totalDuration = lastMove.duration + lastMove.turnDuration;
@@ -1325,11 +1356,6 @@ class GameScene extends Phaser.Scene {
                     // Unit is still in motion - animate from last position
                     const startX = lastMove.x * TILE_SIZE + TILE_SIZE/2;
                     const startY = lastMove.y * TILE_SIZE + TILE_SIZE/2;
-                    const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
-                    const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
-                    
-                    // Kill any existing tweens
-                    this.tweens.killTweensOf(unit);
                     
                     // Position at start of motion
                     unit.setPosition(startX, startY);
@@ -1337,59 +1363,27 @@ class GameScene extends Phaser.Scene {
                     
                     // Calculate remaining duration
                     const remainingDuration = Math.max(0, totalDuration - elapsed);
-                    const remainingTurnDuration = Math.max(0, lastMove.turnDuration - elapsed);
                     
                     // Animate remaining motion
-                    if (unit.getData('unitType') !== 'INFANTRY' && remainingTurnDuration > 0) {
-                        // Vehicles turn first, then move
-                        this.tweens.add({
-                            targets: unit,
-                            angle: unitData.facing,
-                            duration: remainingTurnDuration,
-                            ease: 'Linear',
-                            onComplete: () => {
-                                this.tweens.add({
-                                    targets: unit,
-                                    x: targetX,
-                                    y: targetY,
-                                    duration: remainingDuration - remainingTurnDuration,
-                                    ease: 'Linear',
-                                    onComplete: () => {
-                                        unit.setData('gridX', unitData.x);
-                                        unit.setData('gridY', unitData.y);
-                                        unit.setData('facing', unitData.facing);
-                                        if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                                            unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                                            this.map[unitData.x][unitData.y].setData('occupied', true);
-                                        }
-                                    }
-                                });
+                    this.tweens.add({
+                        targets: unit,
+                        x: targetX,
+                        y: targetY,
+                        angle: unitData.facing,
+                        duration: remainingDuration,
+                        ease: 'Linear',
+                        onComplete: () => {
+                            unit.setData('gridX', unitData.x);
+                            unit.setData('gridY', unitData.y);
+                            unit.setData('facing', unitData.facing);
+                            if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                                unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                                this.map[unitData.x][unitData.y].setData('occupied', true);
                             }
-                        });
-                    } else {
-                        // Infantry or no turning needed
-                        this.tweens.add({
-                            targets: unit,
-                            x: targetX,
-                            y: targetY,
-                            angle: unitData.facing,
-                            duration: remainingDuration,
-                            ease: 'Linear',
-                            onComplete: () => {
-                                unit.setData('gridX', unitData.x);
-                                unit.setData('gridY', unitData.y);
-                                unit.setData('facing', unitData.facing);
-                                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                                    this.map[unitData.x][unitData.y].setData('occupied', true);
-                                }
-                            }
-                        });
-                    }
+                        }
+                    });
                 } else {
                     // Motion complete - set final position
-                    const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
-                    const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
                     unit.setPosition(targetX, targetY);
                     unit.setAngle(unitData.facing);
                     unit.setData('gridX', unitData.x);
@@ -1400,30 +1394,6 @@ class GameScene extends Phaser.Scene {
                         this.map[unitData.x][unitData.y].setData('occupied', true);
                     }
                 }
-            } else if (currentX !== unitData.x || currentY !== unitData.y || 
-                       unit.getData('facing') !== unitData.facing) {
-                // No motion data but position changed - use catch-up animation
-                const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
-                const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
-                
-                this.tweens.killTweensOf(unit);
-                this.tweens.add({
-                    targets: unit,
-                    x: targetX,
-                    y: targetY,
-                    angle: unitData.facing,
-                    duration: 500, // Short catch-up animation
-                    ease: 'Linear',
-                    onComplete: () => {
-                        unit.setData('gridX', unitData.x);
-                        unit.setData('gridY', unitData.y);
-                        unit.setData('facing', unitData.facing);
-                        if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                            unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                            this.map[unitData.x][unitData.y].setData('occupied', true);
-                        }
-                    }
-                });
             }
             
             updatedUnits.add(id);
@@ -1447,6 +1417,13 @@ class GameScene extends Phaser.Scene {
         // Update minimap
         if (this.minimapContext && this.minimapCanvas) {
             this.updateMinimap();
+        }
+    }
+
+    private updateGameIdText(gameId: string) {
+        if (this.gameId) {
+            this.gameId = gameId;
+            this.updateGameIdText(gameId);
         }
     }
 }

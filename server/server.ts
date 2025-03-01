@@ -79,6 +79,7 @@ interface MoveUnitData {
   facing: number;
   duration: number;
   turnDuration: number;
+  timestamp?: number; // Add optional timestamp
 }
 
 // Game state storage
@@ -289,8 +290,8 @@ io.on('connection', (socket) => {
         unit.y = data.y;
         unit.facing = data.facing;
         
-        // Broadcast movement to all players in the game
-        io.to(gameId).emit('unitMoved', data);
+        // Broadcast movement to all players in the game with timestamp
+        io.to(gameId).emit('unitMoved', { ...data, timestamp: now });
         console.log(`Server broadcasted movement for unit ${data.id} in game ${gameId}`);
       }
     }
