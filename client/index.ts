@@ -590,6 +590,7 @@ class GameScene extends Phaser.Scene {
         unit.setAngle(FacingDirection.NORTH); // Set initial angle
         unit.setData('gridX', gridX); // Set initial grid position
         unit.setData('gridY', gridY); // Set initial grid position
+        unit.setVisible(true); // Ensure visibility
         
         const stats = UNIT_STATS[type];
         unit.setData('health', stats.health);
@@ -1310,12 +1311,18 @@ class GameScene extends Phaser.Scene {
         const updatedUnits = new Set<string>();
         
         Object.entries(data.units).forEach(([id, unitData]) => {
-            // Try to find unit by server ID first, then by client-generated ID
-            let unit = this.units.find(u => {
-                const unitId = u.getData('id');
-                return unitId === id || // Exact match
-                       (unitId && unitId.startsWith(`${unitData.type}_`) && u.getData('owner') === unitData.owner); // Type + owner match
-            });
+            // First try to find unit by server ID
+            let unit = this.units.find(u => u.getData('id') === id);
+            
+            // If not found, try to find by type and owner (for bot units)
+            if (!unit) {
+                unit = this.units.find(u => {
+                    const unitId = u.getData('id');
+                    const unitOwner = u.getData('owner');
+                    return unitId && unitId.startsWith(unitData.type) && unitOwner === unitData.owner;
+                });
+            }
+            
             const isNewUnit = !unit;
             
             if (!unit) {
@@ -1324,6 +1331,7 @@ class GameScene extends Phaser.Scene {
                 unit = this.createUnit(unitData.type as UnitType, unitData.x, unitData.y);
                 unit.setData('id', id); // Use server's ID
                 unit.setData('owner', unitData.owner);
+                unit.setVisible(true); // Ensure visibility
                 if (unitData.owner === socket.id) {
                     unit.setData('selectable', true);
                 }
@@ -1352,6 +1360,7 @@ class GameScene extends Phaser.Scene {
                 unit.setData('gridY', unitData.y);
                 unit.setData('facing', unitData.facing);
                 unit.setFillStyle(originalColor);
+                unit.setVisible(true); // Ensure visibility
                 if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                     unitData.y >= 0 && unitData.y < MAP_SIZE) {
                     this.map[unitData.x][unitData.y].setData('occupied', true);
@@ -1369,6 +1378,7 @@ class GameScene extends Phaser.Scene {
                     // Position at start of motion
                     unit.setPosition(startX, startY);
                     unit.setAngle(lastMove.facing);
+                    unit.setVisible(true); // Ensure visibility
                     
                     // Calculate remaining duration
                     const remainingDuration = Math.max(0, totalDuration - elapsed);
@@ -1385,6 +1395,7 @@ class GameScene extends Phaser.Scene {
                             unit.setData('gridX', unitData.x);
                             unit.setData('gridY', unitData.y);
                             unit.setData('facing', unitData.facing);
+                            unit.setVisible(true); // Ensure visibility
                             if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                                 unitData.y >= 0 && unitData.y < MAP_SIZE) {
                                 this.map[unitData.x][unitData.y].setData('occupied', true);
@@ -1398,10 +1409,23 @@ class GameScene extends Phaser.Scene {
                     unit.setData('gridX', unitData.x);
                     unit.setData('gridY', unitData.y);
                     unit.setData('facing', unitData.facing);
+                    unit.setVisible(true); // Ensure visibility
                     if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                         unitData.y >= 0 && unitData.y < MAP_SIZE) {
                         this.map[unitData.x][unitData.y].setData('occupied', true);
                     }
+                }
+            } else {
+                // No movement - just update position and ensure visibility
+                unit.setPosition(targetX, targetY);
+                unit.setAngle(unitData.facing);
+                unit.setData('gridX', unitData.x);
+                unit.setData('gridY', unitData.y);
+                unit.setData('facing', unitData.facing);
+                unit.setVisible(true); // Ensure visibility
+                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                    this.map[unitData.x][unitData.y].setData('occupied', true);
                 }
             }
             
