@@ -1489,17 +1489,9 @@ if (gameContainer) {
 }
 const game = new Phaser.Game(config);
 
-// Get URL parameters
-const urlParams = new URLSearchParams(window.location.search);
-const mode = urlParams.get('mode');
-
-// Start the appropriate scene based on the URL and mode
+// Start the appropriate scene based on the URL
 if (window.location.pathname === '/play') {
-    if (mode === 'singleplayer') {
-        game.scene.start('GameScene', { mode: 'singleplayer' });
-    } else {
-        game.scene.start('MainMenu');
-    }
+    game.scene.start('MainMenu');
 } else {
     game.scene.start('MainMenu');
 }

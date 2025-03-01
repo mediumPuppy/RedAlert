@@ -14,12 +14,153 @@ export class GameScene extends Scene {
     private minimapCanvas: HTMLCanvasElement | null = null;
     private minimapContext: CanvasRenderingContext2D | null = null;
     private minimapContainer: HTMLElement | null = null;
+    private inLobby: boolean = true;
+    private initialized: boolean = false;
+    private gameId: string | null = null;
+    private pendingGameCreated: { gameId: string; players: { id: string; team: string | null; ready: boolean }[] } | null = null;
+    private pendingLobbyUpdate: { players: { id: string; team: string | null; ready: boolean }[] } | null = null;
+    private pendingGameStart: { 
+        gameId: string; 
+        players: { id: string; team: string | null; ready: boolean }[]; 
+        units: Record<string, { 
+            x: number; 
+            y: number; 
+            facing: number; 
+            type: string; 
+            owner: string; 
+            lastMove?: { 
+                x: number; 
+                y: number; 
+                facing: number; 
+                timestamp: number; 
+                duration: number; 
+                turnDuration: number; 
+            }; 
+        }> } | null = null;
+    private lastStateUpdate: number = 0;
+    private lastSynced: number = 0;
+    private readonly STATE_UPDATE_DEBOUNCE = 250;
 
     constructor() {
         super({ key: 'GameScene' });
     }
 
     create() {
+        console.log('GameScene create started');
+        this.inLobby = true;
+        this.initialized = true;
+
+        this.cameras.main.setBackgroundColor('#222222');
+        const centerX = this.cameras.main.width / 2;
+        const centerY = this.cameras.main.height / 2;
+
+        const waitingText = this.add.text(centerX, centerY - 50, 'Waiting for Players...', {
+            fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
+            backgroundColor: '#000066', padding: { x: 20, y: 10 }
+        }).setOrigin(0.5);
+
+        const gameIdText = this.add.text(centerX, centerY, this.gameId ? `Game ID: ${this.gameId}` : 'Connecting...', {
+            fontSize: '16px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive'
+        }).setOrigin(0.5);
+
+        socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
+            console.log(`Received gameCreated for ${gameId} with ${players.length} players`);
+            this.gameId = gameId;
+            if (this.initialized) {
+                this.showLobbyUI(players);
+                gameIdText.setText(`Game ID: ${gameId}`);
+                waitingText.destroy();
+            } else {
+                this.pendingGameCreated = { gameId, players };
+            }
+        });
+
+        socket.on('lobbyUpdate', (data: { players: { id: string, team: string | null, ready: boolean }[] }) => {
+            console.log('Received lobbyUpdate event', data);
+            if (this.initialized && this.inLobby) {
+                this.showLobbyUI(data.players);
+            } else {
+                this.pendingLobbyUpdate = data;
+            }
+        });
+
+        socket.on('gameState', (data: { 
+            gameId: string, 
+            players: { id: string, team: string | null, ready: boolean }[], 
+            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string; lastMove?: { x: number; y: number; facing: number; timestamp: number; duration: number; turnDuration: number } }> 
+        }) => {
+            console.log('Received gameState event', data);
+            if (this.initialized) {
+                this.gameId = data.gameId;
+                const now = Date.now();
+                if (now - this.lastStateUpdate >= this.STATE_UPDATE_DEBOUNCE) {
+                    this.handleGameState(data, document.hidden);
+                    this.lastStateUpdate = now;
+                    this.lastSynced = now;
+                }
+                if (!this.inLobby) {
+                    this.updateGameIdText(data.gameId);
+                }
+            } else {
+                this.pendingGameStart = data;
+            }
+        });
+
+        socket.on('gameError', ({ message }: { message: string }) => {
+            console.log(`Game error: ${message}`);
+            this.scene.start('MainMenu');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            if (this.inLobby) {
+                this.scene.start('MainMenu');
+            } else {
+                this.add.text(centerX, centerY, 'Disconnected from Server', {
+                    fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
+                    backgroundColor: '#ff0000', padding: { x: 20, y: 10 }
+                }).setOrigin(0.5);
+                this.time.delayedCall(2000, () => this.scene.start('MainMenu'));
+            }
+        });
+
+        // Handle tab focus to sync state
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.gameId && !this.inLobby) {
+                console.log(`Tab refocused, requesting game state for ${this.gameId}`);
+                this.tweens.killAll();
+                socket.emit('requestGameState', this.gameId);
+            }
+        });
+
+        // Process pending events
+        if (this.pendingGameCreated) {
+            console.log('Processing pending gameCreated', this.pendingGameCreated);
+            this.gameId = this.pendingGameCreated.gameId;
+            this.showLobbyUI(this.pendingGameCreated.players);
+            gameIdText.setText(`Game ID: ${this.gameId}`);
+            waitingText.destroy();
+            this.pendingGameCreated = null;
+        }
+
+        if (this.pendingLobbyUpdate) {
+            console.log('Processing pending lobbyUpdate', this.pendingLobbyUpdate);
+            this.showLobbyUI(this.pendingLobbyUpdate.players);
+            this.pendingLobbyUpdate = null;
+        }
+
+        if (this.pendingGameStart) {
+            console.log('Processing pending gameStart', this.pendingGameStart);
+            this.inLobby = false;
+            this.startGame(this.pendingGameStart);
+            waitingText.destroy();
+            this.pendingGameStart = null;
+        }
+
+        // Join matchmaking
+        socket.emit('joinMatchmaking');
+        waitingText.setText('Finding Players...');
+
         this.createMap();
         this.createInitialUnits();
         this.createUI();
@@ -526,5 +667,57 @@ export class GameScene extends Scene {
             // But for now we'll just remove all
             this.minimapCanvas.removeEventListener('click', () => {});
         }
+    }
+
+    private showLobbyUI(players: { id: string; team: string | null; ready: boolean }[]): void {
+        // Implementation will be added later
+    }
+
+    private handleGameState(data: { 
+        gameId: string; 
+        players: { id: string; team: string | null; ready: boolean }[]; 
+        units: Record<string, { 
+            x: number; 
+            y: number; 
+            facing: number; 
+            type: string; 
+            owner: string; 
+            lastMove?: { 
+                x: number; 
+                y: number; 
+                facing: number; 
+                timestamp: number; 
+                duration: number; 
+                turnDuration: number; 
+            }; 
+        }>; 
+    }, isRefocus: boolean = false): void {
+        // Implementation will be added later
+    }
+
+    private updateGameIdText(gameId: string): void {
+        // Implementation will be added later
+    }
+
+    private startGame(data: { 
+        gameId: string; 
+        players: { id: string; team: string | null; ready: boolean }[]; 
+        units: Record<string, { 
+            x: number; 
+            y: number; 
+            facing: number; 
+            type: string; 
+            owner: string; 
+            lastMove?: { 
+                x: number; 
+                y: number; 
+                facing: number; 
+                timestamp: number; 
+                duration: number; 
+                turnDuration: number; 
+            }; 
+        }>; 
+    }): void {
+        // Implementation will be added later
     }
 }
