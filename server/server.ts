@@ -48,12 +48,28 @@ interface Player {
   ready: boolean;
 }
 
+interface Unit {
+  x: number;
+  y: number;
+  facing: number;
+  type: string;
+  owner: string;
+  lastMove?: {
+    x: number;
+    y: number;
+    facing: number;
+    timestamp: number;
+    duration: number;
+    turnDuration: number;
+  };
+}
+
 interface Game {
   id: string;
   players: Player[];
   mapSize: number;
   state: 'LOBBY' | 'RUNNING' | 'ENDED';
-  units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>;
+  units: Record<string, Unit>;
 }
 
 interface MoveUnitData {
@@ -257,6 +273,16 @@ io.on('connection', (socket) => {
         if (isOccupied) {
           return; // Skip move if target is occupied
         }
+        
+        // Store last move before updating position
+        unit.lastMove = {
+          x: unit.x,
+          y: unit.y,
+          facing: unit.facing,
+          timestamp: now,
+          duration: data.duration,
+          turnDuration: data.turnDuration
+        };
         
         // Update unit position on server
         unit.x = data.x;

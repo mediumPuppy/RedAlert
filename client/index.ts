@@ -1260,7 +1260,21 @@ class GameScene extends Phaser.Scene {
     private handleGameState(data: { 
         gameId: string, 
         players: { id: string, team: string | null, ready: boolean }[], 
-        units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }> 
+        units: Record<string, { 
+            x: number; 
+            y: number; 
+            facing: number; 
+            type: string; 
+            owner: string;
+            lastMove?: {
+                x: number;
+                y: number;
+                facing: number;
+                timestamp: number;
+                duration: number;
+                turnDuration: number;
+            };
+        }> 
     }) {
         this.gameId = data.gameId;
         
@@ -1275,109 +1289,138 @@ class GameScene extends Phaser.Scene {
             this.createMap();
         }
         
-        // Update existing units or create new ones with smooth transition
+        const now = Date.now();
         const updatedUnits = new Set<string>();
         
         Object.entries(data.units).forEach(([id, unitData]) => {
             let unit = this.units.find(u => u.getData('id') === id);
+            const isNewUnit = !unit;
             
             if (!unit) {
                 // Create new unit if it doesn't exist
                 console.log(`Creating new unit ${unitData.type} with ID ${id}`);
-                unit = this.add.rectangle(
-                    unitData.x * TILE_SIZE + TILE_SIZE/2,
-                    unitData.y * TILE_SIZE + TILE_SIZE/2,
-                    unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
-                    unitData.type === 'INFANTRY' ? TILE_SIZE * 0.5 : TILE_SIZE * 0.8,
-                    COLORS[unitData.type as UnitType]
-                );
-                
-                unit.setStrokeStyle(1, 0x000000);
-                unit.setInteractive();
-                unit.setData('type', 'UNIT');
-                unit.setData('unitType', unitData.type);
+                unit = this.createUnit(unitData.type as UnitType, unitData.x, unitData.y);
                 unit.setData('id', id);
-                unit.setData('originalColor', COLORS[unitData.type as UnitType]);
-                unit.setData('facing', unitData.facing);
-                unit.setAngle(unitData.facing);
-                unit.setData('gridX', unitData.x);
-                unit.setData('gridY', unitData.y);
                 unit.setData('owner', unitData.owner);
-                
-                // Only allow selection of units owned by this player
                 if (unitData.owner === socket.id) {
                     unit.setData('selectable', true);
                 }
+            }
+            
+            const currentX = unit.getData('gridX');
+            const currentY = unit.getData('gridY');
+            
+            // Clear current position
+            if (currentX >= 0 && currentX < MAP_SIZE && currentY >= 0 && currentY < MAP_SIZE) {
+                this.map[currentX][currentY].setData('occupied', false);
+            }
+            
+            // Handle unit motion based on lastMove data
+            if (unitData.lastMove && (isNewUnit || currentX !== unitData.x || currentY !== unitData.y)) {
+                const lastMove = unitData.lastMove;
+                const elapsed = now - lastMove.timestamp;
+                const totalDuration = lastMove.duration + lastMove.turnDuration;
                 
-                const stats = UNIT_STATS[unitData.type as UnitType];
-                unit.setData('health', stats.health);
-                unit.setData('damage', stats.damage || 0);
-                unit.setData('range', stats.range || 1);
-                unit.setData('speed', stats.speed);
-                
-                if (unitData.type === 'HARVESTER') {
-                    unit.setData('capacity', stats.capacity || 100);
+                if (elapsed < totalDuration) {
+                    // Unit is still in motion - animate from last position
+                    const startX = lastMove.x * TILE_SIZE + TILE_SIZE/2;
+                    const startY = lastMove.y * TILE_SIZE + TILE_SIZE/2;
+                    const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
+                    const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
+                    
+                    // Kill any existing tweens
+                    this.tweens.killTweensOf(unit);
+                    
+                    // Position at start of motion
+                    unit.setPosition(startX, startY);
+                    unit.setAngle(lastMove.facing);
+                    
+                    // Calculate remaining duration
+                    const remainingDuration = Math.max(0, totalDuration - elapsed);
+                    const remainingTurnDuration = Math.max(0, lastMove.turnDuration - elapsed);
+                    
+                    // Animate remaining motion
+                    if (unit.getData('unitType') !== 'INFANTRY' && remainingTurnDuration > 0) {
+                        // Vehicles turn first, then move
+                        this.tweens.add({
+                            targets: unit,
+                            angle: unitData.facing,
+                            duration: remainingTurnDuration,
+                            ease: 'Linear',
+                            onComplete: () => {
+                                this.tweens.add({
+                                    targets: unit,
+                                    x: targetX,
+                                    y: targetY,
+                                    duration: remainingDuration - remainingTurnDuration,
+                                    ease: 'Linear',
+                                    onComplete: () => {
+                                        unit.setData('gridX', unitData.x);
+                                        unit.setData('gridY', unitData.y);
+                                        unit.setData('facing', unitData.facing);
+                                        if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                                            unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                                            this.map[unitData.x][unitData.y].setData('occupied', true);
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    } else {
+                        // Infantry or no turning needed
+                        this.tweens.add({
+                            targets: unit,
+                            x: targetX,
+                            y: targetY,
+                            angle: unitData.facing,
+                            duration: remainingDuration,
+                            ease: 'Linear',
+                            onComplete: () => {
+                                unit.setData('gridX', unitData.x);
+                                unit.setData('gridY', unitData.y);
+                                unit.setData('facing', unitData.facing);
+                                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                                    this.map[unitData.x][unitData.y].setData('occupied', true);
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    // Motion complete - set final position
+                    const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
+                    const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
+                    unit.setPosition(targetX, targetY);
+                    unit.setAngle(unitData.facing);
+                    unit.setData('gridX', unitData.x);
+                    unit.setData('gridY', unitData.y);
+                    unit.setData('facing', unitData.facing);
+                    if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                        unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                        this.map[unitData.x][unitData.y].setData('occupied', true);
+                    }
                 }
-                
-                this.units.push(unit);
-                
-                // Mark the tile as occupied
-                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                    this.map[unitData.x][unitData.y].setData('occupied', true);
-                }
-            } else {
-                // Update existing unit with smooth animation
-                const currentX = unit.getData('gridX');
-                const currentY = unit.getData('gridY');
-                
-                // Skip if unit hasn't moved
-                if (currentX === unitData.x && currentY === unitData.y && 
-                    unit.getData('facing') === unitData.facing) {
-                    updatedUnits.add(id);
-                    return;
-                }
-                
-                // Clear old position
-                if (currentX >= 0 && currentX < MAP_SIZE && 
-                    currentY >= 0 && currentY < MAP_SIZE) {
-                    this.map[currentX][currentY].setData('occupied', false);
-                }
-                
-                // Calculate target position
+            } else if (currentX !== unitData.x || currentY !== unitData.y || 
+                       unit.getData('facing') !== unitData.facing) {
+                // No motion data but position changed - use catch-up animation
                 const targetX = unitData.x * TILE_SIZE + TILE_SIZE/2;
                 const targetY = unitData.y * TILE_SIZE + TILE_SIZE/2;
-                const originalColor = unit.getData('originalColor') || COLORS[unitData.type as UnitType];
                 
-                // Stop any existing tweens for this unit
                 this.tweens.killTweensOf(unit);
-                
-                // Animate to new position with a short, fixed duration
                 this.tweens.add({
                     targets: unit,
                     x: targetX,
                     y: targetY,
                     angle: unitData.facing,
-                    duration: 500, // Short catch-up animation (500ms)
+                    duration: 500, // Short catch-up animation
                     ease: 'Linear',
-                    onStart: () => {
-                        if (unit) {  // Add null check for TypeScript
-                            unit.setFillStyle(originalColor);
-                            unit.setVisible(true);
-                        }
-                    },
                     onComplete: () => {
-                        if (unit) {  // Add null check for TypeScript
-                            unit.setData('gridX', unitData.x);
-                            unit.setData('gridY', unitData.y);
-                            unit.setData('facing', unitData.facing);
-                            unit.setFillStyle(originalColor);
-                            unit.setVisible(true);
-                            
-                            if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                                unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                                this.map[unitData.x][unitData.y].setData('occupied', true);
-                            }
+                        unit.setData('gridX', unitData.x);
+                        unit.setData('gridY', unitData.y);
+                        unit.setData('facing', unitData.facing);
+                        if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
+                            unitData.y >= 0 && unitData.y < MAP_SIZE) {
+                            this.map[unitData.x][unitData.y].setData('occupied', true);
                         }
                     }
                 });
@@ -1386,11 +1429,10 @@ class GameScene extends Phaser.Scene {
             updatedUnits.add(id);
         });
         
-        // Remove units that no longer exist in the server state
+        // Remove units that no longer exist
         this.units = this.units.filter(unit => {
             const id = unit.getData('id');
             if (!updatedUnits.has(id)) {
-                console.log(`Removing unit ${id} as it no longer exists in server state`);
                 const x = unit.getData('gridX');
                 const y = unit.getData('gridY');
                 if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
