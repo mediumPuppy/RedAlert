@@ -12,8 +12,6 @@ const __dirname = path.dirname(__filename);
 const MAP_SIZE = 128;
 const MAX_PLAYERS_PER_GAME = 6;
 const MATCHMAKING_TIMEOUT = 10000; // 10 seconds timeout for matchmaking
-const ORE_PER_TILE = 500;
-const ORE_HARVEST_RATE = 50;
 
 // Initialize Express app and HTTP server
 const app = express();
@@ -48,9 +46,6 @@ interface Player {
   id: string;
   team: string | null;
   ready: boolean;
-  resources: number;
-  power: number;
-  powerUsed: number;
 }
 
 interface Unit {
@@ -69,39 +64,12 @@ interface Unit {
   };
 }
 
-interface Building {
-  x: number;
-  y: number;
-  type: string;
-  owner: string;
-  health: number;
-  productionQueue?: {
-    unitType: string;
-    startTime: number;
-    buildTime: number;
-  }[];
-}
-
-interface MapTile {
-  type: string;
-  oreAmount?: number;
-}
-
-interface BotState {
-  lastMoveTime: number;
-  targetUnit?: string;
-  targetResource?: { x: number; y: number };
-}
-
 interface Game {
   id: string;
   players: Player[];
   mapSize: number;
   state: 'LOBBY' | 'RUNNING' | 'ENDED';
   units: Record<string, Unit>;
-  buildings: Record<string, Building>;
-  map: MapTile[][];
-  bots?: Record<string, BotState>;
 }
 
 interface MoveUnitData {
@@ -170,118 +138,83 @@ io.on('connection', (socket) => {
 
   // Join matchmaking queue
   socket.on('joinMatchmaking', (data = {}) => {
-    matchmakingQueue.push(socket.id);
-    socket.emit('matchmakingStarted');
-    console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
+    const mode = data.mode || 'multiplayer';
+    const isSinglePlayer = mode === 'singleplayer';
 
-    // Start game immediately if we reach MAX_PLAYERS_PER_GAME
-    if (matchmakingQueue.length === MAX_PLAYERS_PER_GAME) {
-      if (matchmakingTimer) {
-        clearTimeout(matchmakingTimer);
-        matchmakingTimer = null;
-      }
-      const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
-      createGame(gamePlayers); // Multiplayer game with max players
-    } 
-    // Start timer if this is the first player or timer isn't running
-    else if (!matchmakingTimer) {
-      matchmakingTimer = setTimeout(() => {
-        if (matchmakingQueue.length >= 2) {
-          // Start multiplayer game with 2-5 players
-          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-          createGame(gamePlayers);
+    if (isSinglePlayer) {
+      console.log(`Player ${socket.id} requested single-player game`);
+      createGame([socket.id], true); // Immediate single-player game
+    } else {
+      matchmakingQueue.push(socket.id);
+      socket.emit('matchmakingStarted');
+      console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
+
+      // Start game immediately if we reach MAX_PLAYERS_PER_GAME
+      if (matchmakingQueue.length === MAX_PLAYERS_PER_GAME) {
+        if (matchmakingTimer) {
+          clearTimeout(matchmakingTimer);
+          matchmakingTimer = null;
         }
-        matchmakingTimer = null;
-      }, MATCHMAKING_TIMEOUT);
+        const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
+        createGame(gamePlayers, false); // Multiplayer game with max players
+      } 
+      // Start timer if this is the first player or timer isn't running
+      else if (!matchmakingTimer) {
+        matchmakingTimer = setTimeout(() => {
+          if (matchmakingQueue.length >= 2) {
+            // Start multiplayer game with 2-5 players
+            const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+            createGame(gamePlayers, false);
+          } else if (matchmakingQueue.length === 1) {
+            // Start single-player game with bot if only one player
+            const gamePlayers = matchmakingQueue.splice(0, 1);
+            createGame(gamePlayers, true);
+          }
+          matchmakingTimer = null;
+        }, MATCHMAKING_TIMEOUT);
+      }
     }
   });
 
   // Helper function to create a game with the given players
-  function createGame(gamePlayers: string[]) {
+  function createGame(gamePlayers: string[], singlePlayer: boolean) {
     const gameId = `game_${Date.now()}`;
-    const initialUnits: Record<string, Unit> = {};
-    const initialBuildings: Record<string, Building> = {};
-    const map: MapTile[][] = [];
-
-    // Generate map
-    for (let x = 0; x < MAP_SIZE; x++) {
-      map[x] = [];
-      for (let y = 0; y < MAP_SIZE; y++) {
-        const rand = Math.random();
-        const tile: MapTile = {
-          type: rand < 0.1 ? 'WATER' : rand < 0.25 ? 'ORE' : 'GRASS'
-        };
-        if (tile.type === 'ORE') {
-          tile.oreAmount = ORE_PER_TILE;
-        }
-        map[x][y] = tile;
-      }
-    }
-
-    // Define players with initial resources and power
-    const players = gamePlayers.map(id => ({
-      id,
-      team: null,
-      ready: false,
-      resources: 1000,
-      power: 0,
-      powerUsed: 0
-    }));
+    const initialUnits: Record<string, any> = {};
 
     games[gameId] = {
       id: gameId,
-      players,
+      players: gamePlayers.map(id => ({ id, team: null, ready: false })),
       mapSize: MAP_SIZE,
-      state: 'LOBBY',
-      units: initialUnits,
-      buildings: initialBuildings,
-      map,
-      bots: {}
+      state: singlePlayer ? 'RUNNING' : 'LOBBY',
+      units: initialUnits
     };
 
-    // Create initial units for human players
+    // Create initial units for each player
     gamePlayers.forEach((playerId, i) => {
-      const startX = i * 5 + 2;
+      const startX = i * 5 + 2; // Spread players out
       initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
       initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
       initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
-
-      // Create initial Power Plant for each player
-      const powerPlantId = `POWER_PLANT_${playerId}`;
-      initialBuildings[powerPlantId] = {
-        x: startX,
-        y: 4,
-        type: 'POWER_PLANT',
-        owner: playerId,
-        health: 200
-      };
-
       const playerSocket = io.sockets.sockets.get(playerId);
       if (playerSocket) {
         playerSocket.join(gameId);
         console.log(`Player ${playerId} joined room ${gameId}`);
+      } else {
+        console.warn(`Socket for player ${playerId} not found`);
       }
     });
 
-    io.to(gameId).emit('gameCreated', {
-      gameId,
-      players: games[gameId].players,
-      mapData: map.flat().map((tile, i) => ({
-        x: Math.floor(i / MAP_SIZE),
-        y: i % MAP_SIZE,
-        type: tile.type,
-        oreAmount: tile.oreAmount
-      }))
-    });
+    console.log(`Emitting gameCreated to ${gameId} with ${gamePlayers.length} players`);
+    io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
+    console.log(`Emitting gameState to ${gameId}`);
+    io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
 
-    io.to(gameId).emit('gameState', {
-      gameId,
-      players: games[gameId].players,
-      units: games[gameId].units,
-      buildings: games[gameId].buildings
-    });
-    
-    console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
+    if (singlePlayer) {
+      console.log(`Emitting gameStart to ${gameId} for single-player`);
+      io.to(gameId).emit('gameStart', { gameId, players: games[gameId].players, units: games[gameId].units });
+    }
+
+    console.log(`Game ${gameId} created with ${gamePlayers.length} players (${singlePlayer ? 'Single-player' : 'Multiplayer'})`);
   }
 
   // Set team
@@ -361,120 +294,6 @@ io.on('connection', (socket) => {
         io.to(gameId).emit('unitMoved', { ...data, timestamp: now });
         console.log(`Server broadcasted movement for unit ${data.id} in game ${gameId}`);
       }
-    }
-  });
-
-  // Handle building placement
-  socket.on('placeBuilding', ({ gameId, type, x, y }: { gameId: string, type: string, x: number, y: number }) => {
-    const game = games[gameId];
-    if (!game || game.state !== 'RUNNING') return;
-
-    const player = game.players.find(p => p.id === socket.id);
-    if (!player) return;
-
-    // Check if location is valid (not water, not occupied)
-    let isValid = true;
-    for (let dx = 0; dx < 2; dx++) {
-      for (let dy = 0; dy < 2; dy++) {
-        const checkX = x + dx;
-        const checkY = y + dy;
-        if (checkX < 0 || checkX >= MAP_SIZE || checkY < 0 || checkY >= MAP_SIZE ||
-            game.map[checkX][checkY].type === 'WATER') {
-          isValid = false;
-          break;
-        }
-      }
-      if (!isValid) break;
-    }
-
-    if (!isValid) {
-      socket.emit('buildingError', { message: 'Invalid building location' });
-      return;
-    }
-
-    const buildingId = `${type}_${Date.now()}_${socket.id}`;
-    game.buildings[buildingId] = {
-      x,
-      y,
-      type,
-      owner: socket.id,
-      health: 200 // Get from building stats
-    };
-
-    io.to(gameId).emit('buildingPlaced', {
-      id: buildingId,
-      type,
-      x,
-      y,
-      owner: socket.id
-    });
-  });
-
-  // Handle unit production
-  socket.on('produceUnit', ({ gameId, buildingId, unitType }: { gameId: string, buildingId: string, unitType: string }) => {
-    const game = games[gameId];
-    if (!game || game.state !== 'RUNNING') return;
-
-    const building = game.buildings[buildingId];
-    const player = game.players.find(p => p.id === socket.id);
-    if (!building || !player || building.owner !== socket.id) return;
-
-    // Add to building's production queue
-    if (!building.productionQueue) building.productionQueue = [];
-    building.productionQueue.push({
-      unitType,
-      startTime: Date.now(),
-      buildTime: 10000 // Get from unit stats
-    });
-
-    // Notify clients
-    io.to(gameId).emit('productionStarted', {
-      buildingId,
-      unitType,
-      startTime: Date.now()
-    });
-  });
-
-  // Handle resource harvesting
-  socket.on('harvest', ({ gameId, tileX, tileY, amount }: { gameId: string, tileX: number, tileY: number, amount: number }) => {
-    const game = games[gameId];
-    if (!game || game.state !== 'RUNNING') return;
-
-    const tile = game.map[tileX]?.[tileY];
-    if (!tile || tile.type !== 'ORE' || !tile.oreAmount) return;
-
-    const harvestAmount = Math.min(amount, tile.oreAmount);
-    tile.oreAmount -= harvestAmount;
-
-    const player = game.players.find(p => p.id === socket.id);
-    if (player) {
-      player.resources += harvestAmount;
-    }
-
-    io.to(gameId).emit('resourceUpdate', {
-      tileX,
-      tileY,
-      amount: tile.oreAmount
-    });
-
-    io.to(gameId).emit('gameState', {
-      gameId,
-      players: game.players,
-      units: game.units,
-      buildings: game.buildings
-    });
-  });
-
-  // Handle power updates
-  socket.on('updatePower', ({ gameId, power, powerUsed }: { gameId: string, power: number, powerUsed: number }) => {
-    const game = games[gameId];
-    if (!game || game.state !== 'RUNNING') return;
-
-    const player = game.players.find(p => p.id === socket.id);
-    if (player) {
-      player.power = power;
-      player.powerUsed = powerUsed;
-      socket.emit('powerUpdate', { power, powerUsed });
     }
   });
 

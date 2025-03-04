@@ -1,6 +1,6 @@
 // client/game/scenes/GameScene.ts
 import { Scene } from 'phaser';
-import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, BUILDING_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType, BuildingType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED, ORE_PER_TILE, ORE_HARVEST_RATE } from '../constants';
+import { TILE_SIZE, GRID_SIZE, COLORS, UNIT_STATS, GAME_WIDTH, GAME_HEIGHT, TileType, UnitType, FacingDirection, TERRAIN_SPEED_MODIFIERS, MAP_SIZE, MAP_WIDTH, MAP_HEIGHT, SCROLL_SPEED } from '../constants';
 
 // Declare socket for multiplayer
 declare const socket: any;
@@ -8,174 +8,18 @@ declare const socket: any;
 export class GameScene extends Scene {
     private map: Phaser.GameObjects.Rectangle[][] = [];
     private units: Phaser.GameObjects.Rectangle[] = [];
-    private buildings: Phaser.GameObjects.Rectangle[] = [];
     private selectedUnit: Phaser.GameObjects.Rectangle | null = null;
-    private selectedBuilding: Phaser.GameObjects.Rectangle | null = null;
     private resources: number = 1000;
-    private power: number = 0; // Total power available
-    private powerUsed: number = 0; // Total power consumed
     private resourceText!: Phaser.GameObjects.Text;
-    private powerText!: Phaser.GameObjects.Text;
     private minimapCanvas: HTMLCanvasElement | null = null;
     private minimapContext: CanvasRenderingContext2D | null = null;
     private minimapContainer: HTMLElement | null = null;
-    private inLobby: boolean = true;
-    private initialized: boolean = false;
-    private gameId: string | null = null;
-    private productionQueue: { buildingId: string; unitType: UnitType; startTime: number }[] = [];
-    private pendingGameCreated: { gameId: string; players: { id: string; team: string | null; ready: boolean }[] } | null = null;
-    private pendingLobbyUpdate: { players: { id: string; team: string | null; ready: boolean }[] } | null = null;
-    private pendingGameStart: { 
-        gameId: string; 
-        players: { id: string; team: string | null; ready: boolean }[]; 
-        units: Record<string, { 
-            x: number; 
-            y: number; 
-            facing: number; 
-            type: string; 
-            owner: string; 
-            lastMove?: { 
-                x: number; 
-                y: number; 
-                facing: number; 
-                timestamp: number; 
-                duration: number; 
-                turnDuration: number; 
-            }; 
-        }>;
-        buildings: Record<string, {
-            x: number;
-            y: number;
-            type: string;
-            owner: string;
-            health: number;
-        }>;
-    } | null = null;
-    private lastStateUpdate: number = 0;
-    private lastSynced: number = 0;
-    private readonly STATE_UPDATE_DEBOUNCE = 250;
 
     constructor() {
         super({ key: 'GameScene' });
     }
 
     create() {
-        console.log('GameScene create started');
-        this.inLobby = true;
-        this.initialized = true;
-
-        this.cameras.main.setBackgroundColor('#222222');
-        const centerX = this.cameras.main.width / 2;
-        const centerY = this.cameras.main.height / 2;
-
-        const waitingText = this.add.text(centerX, centerY - 50, 'Waiting for Players...', {
-            fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
-            backgroundColor: '#000066', padding: { x: 20, y: 10 }
-        }).setOrigin(0.5);
-
-        const gameIdText = this.add.text(centerX, centerY, this.gameId ? `Game ID: ${this.gameId}` : 'Connecting...', {
-            fontSize: '16px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive'
-        }).setOrigin(0.5);
-
-        socket.on('gameCreated', ({ gameId, players }: { gameId: string, players: { id: string, team: string | null, ready: boolean }[] }) => {
-            console.log(`Received gameCreated for ${gameId} with ${players.length} players`);
-            this.gameId = gameId;
-            if (this.initialized) {
-                this.showLobbyUI(players);
-                gameIdText.setText(`Game ID: ${gameId}`);
-                waitingText.destroy();
-            } else {
-                this.pendingGameCreated = { gameId, players };
-            }
-        });
-
-        socket.on('lobbyUpdate', (data: { players: { id: string, team: string | null, ready: boolean }[] }) => {
-            console.log('Received lobbyUpdate event', data);
-            if (this.initialized && this.inLobby) {
-                this.showLobbyUI(data.players);
-            } else {
-                this.pendingLobbyUpdate = data;
-            }
-        });
-
-        socket.on('gameState', (data: { 
-            gameId: string, 
-            players: { id: string, team: string | null, ready: boolean }[], 
-            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string; lastMove?: { x: number; y: number; facing: number; timestamp: number; duration: number; turnDuration: number } }>,
-            buildings: Record<string, { x: number; y: number; type: string; owner: string; health: number }> 
-        }) => {
-            console.log('Received gameState event', data);
-            if (this.initialized) {
-                this.gameId = data.gameId;
-                const now = Date.now();
-                if (now - this.lastStateUpdate >= this.STATE_UPDATE_DEBOUNCE) {
-                    this.handleGameState(data, document.hidden);
-                    this.lastStateUpdate = now;
-                    this.lastSynced = now;
-                }
-                if (!this.inLobby) {
-                    this.updateGameIdText(data.gameId);
-                }
-            } else {
-                this.pendingGameStart = data;
-            }
-        });
-
-        socket.on('gameError', ({ message }: { message: string }) => {
-            console.log(`Game error: ${message}`);
-            this.scene.start('MainMenu');
-        });
-
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            if (this.inLobby) {
-                this.scene.start('MainMenu');
-            } else {
-                this.add.text(centerX, centerY, 'Disconnected from Server', {
-                    fontSize: '24px', color: '#ffffff', fontFamily: '"Press Start 2P", cursive',
-                    backgroundColor: '#ff0000', padding: { x: 20, y: 10 }
-                }).setOrigin(0.5);
-                this.time.delayedCall(2000, () => this.scene.start('MainMenu'));
-            }
-        });
-
-        // Handle tab focus to sync state
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && this.gameId && !this.inLobby) {
-                console.log(`Tab refocused, requesting game state for ${this.gameId}`);
-                this.tweens.killAll();
-                socket.emit('requestGameState', this.gameId);
-            }
-        });
-
-        // Process pending events
-        if (this.pendingGameCreated) {
-            console.log('Processing pending gameCreated', this.pendingGameCreated);
-            this.gameId = this.pendingGameCreated.gameId;
-            this.showLobbyUI(this.pendingGameCreated.players);
-            gameIdText.setText(`Game ID: ${this.gameId}`);
-            waitingText.destroy();
-            this.pendingGameCreated = null;
-        }
-
-        if (this.pendingLobbyUpdate) {
-            console.log('Processing pending lobbyUpdate', this.pendingLobbyUpdate);
-            this.showLobbyUI(this.pendingLobbyUpdate.players);
-            this.pendingLobbyUpdate = null;
-        }
-
-        if (this.pendingGameStart) {
-            console.log('Processing pending gameStart', this.pendingGameStart);
-            this.inLobby = false;
-            this.startGame(this.pendingGameStart);
-            waitingText.destroy();
-            this.pendingGameStart = null;
-        }
-
-        // Join matchmaking
-        socket.emit('joinMatchmaking');
-        waitingText.setText('Finding Players...');
-
         this.createMap();
         this.createInitialUnits();
         this.createUI();
@@ -258,44 +102,23 @@ export class GameScene extends Scene {
     }
 
     private createUI() {
-        this.resourceText = this.add.text(10, 10, `Resources: ${this.resources}`, {
+        this.resourceText = this.add.text(0, 0, `Resources: ${this.resources}`, {
             fontSize: '16px',
             color: '#ffffff'
         }).setDepth(1);
-        this.powerText = this.add.text(10, 30, `Power: ${this.power}/${this.powerUsed}`, {
-            fontSize: '16px',
-            color: '#ffffff'
-        }).setDepth(1);
-        this.updateUIPositions();
+        this.updateUIPositions(); // Position UI initially
     }
 
     private setupInput() {
         this.input.on('gameobjectdown', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
-            const obj = gameObject as Phaser.GameObjects.Rectangle;
-            const objType = obj.getData('type');
-            const objOwner = obj.getData('owner');
-
-            // Only allow selecting own units/buildings
-            if (objOwner !== socket.id) return;
-
-            if (objType === 'UNIT') {
+            const unit = gameObject as Phaser.GameObjects.Rectangle;
+            if (unit.getData('type') === 'UNIT') {
                 if (this.selectedUnit) this.selectedUnit.setStrokeStyle(1, 0x000000);
-                if (this.selectedBuilding) this.selectedBuilding.setStrokeStyle(1, 0x000000);
-                this.selectedUnit = obj;
-                this.selectedBuilding = null;
-                obj.setStrokeStyle(2, 0xffff00);
-            } else if (objType === 'BUILDING') {
-                if (this.selectedUnit) this.selectedUnit.setStrokeStyle(1, 0x000000);
-                if (this.selectedBuilding) this.selectedBuilding.setStrokeStyle(1, 0x000000);
-                this.selectedBuilding = obj;
-                this.selectedUnit = null;
-                obj.setStrokeStyle(2, 0xffff00);
-
-                // Show production options if building can produce units
-                const buildingType = obj.getData('buildingType') as BuildingType;
-                if (BUILDING_STATS[buildingType].produces?.length) {
-                    this.showProductionMenu(obj);
-                }
+                this.selectedUnit = unit;
+                unit.setStrokeStyle(2, 0xffff00);
+            }
+            if (this.selectedUnit && unit !== this.selectedUnit && unit.getData('type') === 'UNIT') {
+                this.attack(this.selectedUnit, unit);
             }
         });
 
@@ -317,57 +140,32 @@ export class GameScene extends Scene {
     }
 
     update() {
-        // Process production queue
-        const now = Date.now();
-        this.productionQueue = this.productionQueue.filter(item => {
-            const building = this.buildings.find(b => b.getData('id') === item.buildingId);
-            if (!building) return false;
-
-            const buildingType = building.getData('buildingType') as BuildingType;
-            const unitType = item.unitType;
-            const buildTime = UNIT_STATS[unitType].buildTime;
-
-            if (now - item.startTime >= buildTime) {
-                // Unit is ready to be created
-                const gridX = building.getData('gridX');
-                const gridY = building.getData('gridY');
-                // Find a valid spawn position around the building
-                for (let dx = -1; dx <= 2; dx++) {
-                    for (let dy = -1; dy <= 2; dy++) {
-                        const spawnX = gridX + dx;
-                        const spawnY = gridY + dy;
-                        if (this.isValidMove(spawnX, spawnY)) {
-                            this.createUnit(unitType, spawnX, spawnY);
-                            return false; // Remove from queue
-                        }
-                    }
-                }
-                // If no valid spawn position found, refund resources
-                this.resources += UNIT_STATS[unitType].cost;
-                this.updateResourceText();
-                return false;
-            }
-            return true;
+        this.units = this.units.filter(unit => {
+            const health = unit.getData('health');
+            return health !== undefined && health > 0;
         });
-
-        // Existing update code
-        this.units = this.units.filter(unit => unit.getData('health') > 0);
-        this.buildings = this.buildings.filter(building => building.getData('health') > 0);
-
+        
+        // Scroll based on mouse position (inspired by SCROLL.CPP)
         const pointer = this.input.activePointer;
         const cam = this.cameras.main;
-        const edgeSize = 50;
+        const edgeSize = 50; // Pixels from edge to trigger scrolling
+
         if (pointer.isDown || pointer.active) {
-            if (pointer.x < edgeSize && cam.scrollX > 0) cam.scrollX -= SCROLL_SPEED;
-            else if (pointer.x > GAME_WIDTH - edgeSize && cam.scrollX < MAP_WIDTH - GAME_WIDTH) cam.scrollX += SCROLL_SPEED;
-            if (pointer.y < edgeSize && cam.scrollY > 0) cam.scrollY -= SCROLL_SPEED;
-            else if (pointer.y > GAME_HEIGHT - edgeSize && cam.scrollY < MAP_HEIGHT - GAME_HEIGHT) cam.scrollY += SCROLL_SPEED;
+            if (pointer.x < edgeSize && cam.scrollX > 0) {
+                cam.scrollX -= SCROLL_SPEED;
+            } else if (pointer.x > GAME_WIDTH - edgeSize && cam.scrollX < MAP_WIDTH - GAME_WIDTH) {
+                cam.scrollX += SCROLL_SPEED;
+            }
+            if (pointer.y < edgeSize && cam.scrollY > 0) {
+                cam.scrollY -= SCROLL_SPEED;
+            } else if (pointer.y > GAME_HEIGHT - edgeSize && cam.scrollY < MAP_HEIGHT - GAME_HEIGHT) {
+                cam.scrollY += SCROLL_SPEED;
+            }
         }
 
-        this.updateMapPositions();
-        this.updateUnitPositions();
-        this.updateBuildingPositions();
-        this.updateMinimap();
+        this.updateMapPositions(); // Update visible tiles
+        this.updateUnitPositions(); // Update unit positions relative to camera
+        this.updateMinimap(); // Update minimap each frame
     }
 
     private getScaleFactor(): number {
@@ -450,8 +248,6 @@ export class GameScene extends Scene {
         const scaleFactor = this.getScaleFactor();
         this.resourceText.setPosition(10 * scaleFactor, 10 * scaleFactor);
         this.resourceText.setScale(scaleFactor);
-        this.powerText.setPosition(10 * scaleFactor, 30 * scaleFactor);
-        this.powerText.setScale(scaleFactor);
     }
 
     handleResize() {
@@ -667,9 +463,9 @@ export class GameScene extends Scene {
         if (!this.minimapContext || !this.minimapCanvas) return;
         
         const ctx = this.minimapContext;
-        const scale = 1.5;
+        const scale = 1.5; // Scale for minimap
         
-        // Clear canvas
+        // Clear the canvas
         ctx.clearRect(0, 0, this.minimapCanvas.width, this.minimapCanvas.height);
         
         // Draw background
@@ -687,21 +483,6 @@ export class GameScene extends Scene {
             }
         }
         
-        // Draw buildings
-        ctx.globalAlpha = 1.0;
-        this.buildings.forEach(building => {
-            const buildingType = building.getData('buildingType') as BuildingType;
-            const gridX = building.getData('gridX');
-            const gridY = building.getData('gridY');
-            ctx.fillStyle = '#' + COLORS[buildingType].toString(16).padStart(6, '0');
-            ctx.fillRect(
-                gridX * scale,
-                gridY * scale,
-                scale * 2,
-                scale * 2
-            );
-        });
-        
         // Draw units
         ctx.globalAlpha = 1.0;
         this.units.forEach(unit => {
@@ -709,11 +490,13 @@ export class GameScene extends Scene {
             const gridX = unit.getData('gridX');
             const gridY = unit.getData('gridY');
             ctx.fillStyle = '#' + COLORS[unitType].toString(16).padStart(6, '0');
+            
+            // Make units slightly larger on minimap for better visibility
             const unitSize = scale * 1.5;
             ctx.fillRect(
-                gridX * scale - unitSize/4,
-                gridY * scale - unitSize/4,
-                unitSize,
+                gridX * scale - unitSize/4, 
+                gridY * scale - unitSize/4, 
+                unitSize, 
                 unitSize
             );
         });
@@ -743,228 +526,5 @@ export class GameScene extends Scene {
             // But for now we'll just remove all
             this.minimapCanvas.removeEventListener('click', () => {});
         }
-    }
-
-    private showLobbyUI(players: { id: string; team: string | null; ready: boolean }[]): void {
-        // Implementation will be added later
-    }
-
-    private handleGameState(data: { 
-        gameId: string, 
-        players: { id: string, team: string | null, ready: boolean }[], 
-        units: Record<string, { x: number; y: number; facing: number; type: string; owner: string; lastMove?: { x: number; y: number; facing: number; timestamp: number; duration: number; turnDuration: number } }>,
-        buildings: Record<string, { x: number; y: number; type: string; owner: string; health: number }> 
-    }, isRefocus: boolean = false) {
-        // Update buildings
-        Object.entries(data.buildings).forEach(([id, buildingData]) => {
-            const existingBuilding = this.buildings.find(b => b.getData('id') === id);
-            if (!existingBuilding) {
-                // Create new building
-                this.createBuilding(
-                    buildingData.type as BuildingType,
-                    buildingData.x,
-                    buildingData.y,
-                    id,
-                    buildingData.owner
-                );
-            } else {
-                // Update existing building
-                existingBuilding.setData('health', buildingData.health);
-            }
-        });
-
-        // Remove buildings that no longer exist
-        this.buildings = this.buildings.filter(building => {
-            const id = building.getData('id');
-            if (!data.buildings[id]) {
-                building.destroy();
-                return false;
-            }
-            return true;
-        });
-
-        // Update units (existing code)
-        // ... rest of the existing handleGameState implementation ...
-    }
-
-    private updateGameIdText(gameId: string): void {
-        // Implementation will be added later
-    }
-
-    private startGame(data: { 
-        gameId: string; 
-        players: { id: string; team: string | null; ready: boolean }[]; 
-        units: Record<string, { 
-            x: number; 
-            y: number; 
-            facing: number; 
-            type: string; 
-            owner: string; 
-            lastMove?: { 
-                x: number; 
-                y: number; 
-                facing: number; 
-                timestamp: number; 
-                duration: number; 
-                turnDuration: number; 
-            }; 
-        }>; 
-    }): void {
-        // Implementation will be added later
-    }
-
-    private createBuilding(type: BuildingType, gridX: number, gridY: number, id?: string, owner?: string) {
-        const building = this.add.rectangle(0, 0, TILE_SIZE * 2, TILE_SIZE * 2, COLORS[type]);
-        building.setStrokeStyle(1, 0x000000);
-        building.setData('type', 'BUILDING');
-        building.setData('buildingType', type);
-        building.setData('id', id || `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`);
-        building.setData('health', BUILDING_STATS[type].health);
-        building.setData('owner', owner || socket.id);
-        building.setData('gridX', gridX);
-        building.setData('gridY', gridY);
-        building.setInteractive();
-        this.buildings.push(building);
-        this.updateBuildingPosition(building);
-
-        // Update power stats
-        if (BUILDING_STATS[type].powerProvided) {
-            this.power += BUILDING_STATS[type].powerProvided;
-        }
-        this.powerUsed += BUILDING_STATS[type].powerRequired;
-        this.updatePowerText();
-
-        // Mark tiles as occupied
-        for (let x = gridX; x < gridX + 2; x++) {
-            for (let y = gridY; y < gridY + 2; y++) {
-                if (this.map[x]?.[y]) {
-                    this.map[x][y].setData('occupied', true);
-                }
-            }
-        }
-
-        return building;
-    }
-
-    private updateBuildingPosition(building: Phaser.GameObjects.Rectangle) {
-        const scaleFactor = this.getScaleFactor();
-        const gridX = building.getData('gridX');
-        const gridY = building.getData('gridY');
-        building.setPosition(
-            (gridX * TILE_SIZE + TILE_SIZE) * scaleFactor,
-            (gridY * TILE_SIZE + TILE_SIZE) * scaleFactor
-        );
-        building.setScale(scaleFactor * 2);
-    }
-
-    private updateBuildingPositions() {
-        this.buildings.forEach(building => this.updateBuildingPosition(building));
-    }
-
-    private produceUnit(building: Phaser.GameObjects.Rectangle, unitType: UnitType) {
-        const buildingType = building.getData('buildingType') as BuildingType;
-        if (!BUILDING_STATS[buildingType].produces?.includes(unitType)) {
-            console.log(`Building ${buildingType} cannot produce ${unitType}`);
-            return;
-        }
-
-        if (this.resources < UNIT_STATS[unitType].cost) {
-            console.log(`Not enough resources to produce ${unitType}`);
-            return;
-        }
-
-        if (this.power < this.powerUsed + UNIT_STATS[unitType].power) {
-            console.log(`Not enough power to support ${unitType}`);
-            return;
-        }
-
-        this.resources -= UNIT_STATS[unitType].cost;
-        this.updateResourceText();
-        
-        const buildingId = building.getData('id');
-        this.productionQueue.push({
-            buildingId,
-            unitType,
-            startTime: Date.now()
-        });
-
-        socket.emit('produceUnit', {
-            gameId: this.gameId,
-            buildingId,
-            unitType
-        });
-    }
-
-    private updatePowerText() {
-        this.powerText.setText(`Power: ${this.power}/${this.powerUsed}`);
-        this.powerText.setColor(this.power >= this.powerUsed ? '#ffffff' : '#ff0000');
-    }
-
-    private updateResourceText() {
-        this.resourceText.setText(`Resources: ${this.resources}`);
-    }
-
-    private isValidBuildingLocation(x: number, y: number): boolean {
-        // Check if all required tiles are within map bounds and unoccupied
-        for (let dx = 0; dx < 2; dx++) {
-            for (let dy = 0; dy < 2; dy++) {
-                const checkX = x + dx;
-                const checkY = y + dy;
-                
-                // Check bounds
-                if (checkX < 0 || checkX >= MAP_SIZE || checkY < 0 || checkY >= MAP_SIZE) {
-                    return false;
-                }
-                
-                // Check if tile exists and is not occupied or water
-                const tile = this.map[checkX]?.[checkY];
-                if (!tile || tile.getData('occupied') || tile.getData('type') === 'WATER') {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    private showProductionMenu(building: Phaser.GameObjects.Rectangle) {
-        const buildingType = building.getData('buildingType') as BuildingType;
-        const producibleUnits = BUILDING_STATS[buildingType].produces || [];
-        
-        // Remove any existing production menu
-        this.children.list
-            .filter(obj => obj.getData('type') === 'PRODUCTION_MENU')
-            .forEach(obj => obj.destroy());
-
-        // Create production buttons
-        const buttonSize = 40;
-        const padding = 5;
-        const startX = building.x + building.width + padding;
-        const startY = building.y;
-
-        producibleUnits.forEach((unitType, index) => {
-            const button = this.add.rectangle(
-                startX,
-                startY + (buttonSize + padding) * index,
-                buttonSize,
-                buttonSize,
-                COLORS[unitType]
-            );
-            button.setStrokeStyle(1, 0x000000);
-            button.setData('type', 'PRODUCTION_MENU');
-            button.setData('unitType', unitType);
-            button.setInteractive();
-
-            button.on('pointerdown', () => {
-                this.produceUnit(building, unitType);
-            });
-
-            // Add cost text
-            this.add.text(
-                startX + buttonSize/2 + padding,
-                startY + (buttonSize + padding) * index,
-                `${UNIT_STATS[unitType].cost}`,
-                { fontSize: '12px', color: '#ffffff' }
-            ).setData('type', 'PRODUCTION_MENU');
-        });
     }
 }

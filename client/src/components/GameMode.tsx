@@ -82,6 +82,10 @@ const GameMode: React.FC = () => {
         window.location.href = '/play?mode=multiplayer';
     };
 
+    const handleSinglePlayerClick = () => {
+        window.location.href = '/play?mode=singleplayer';
+    };
+
     const handleBackClick = () => {
         window.location.href = '/';
     };
@@ -90,6 +94,7 @@ const GameMode: React.FC = () => {
         <PageWrapper>
             <Title>Select Game Mode</Title>
             <Button color={COLORS.alliedBlue} onClick={handleMultiplayerClick}>Play Multiplayer</Button>
+            <Button color={COLORS.green} onClick={handleSinglePlayerClick}>Play Single Player</Button>
             <BackButton onClick={handleBackClick}>Back</BackButton>
         </PageWrapper>
     );

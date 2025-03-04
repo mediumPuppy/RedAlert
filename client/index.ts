@@ -449,12 +449,8 @@ class GameScene extends Phaser.Scene {
             return;
         }
 
-        // Find the unit by ID, considering both server and client ID formats
-        const unit = this.units.find(u => {
-            const unitId = u.getData('id');
-            return unitId === data.id || // Exact match
-                   (unitId && unitId.startsWith(data.id.split('_')[0]) && u.getData('owner') === data.id.split('_')[1]); // Type + owner match
-        });
+        // Find the unit by ID
+        const unit = this.units.find(u => u.getData('id') === data.id);
         
         if (unit) {
             const unitType = unit.getData('unitType') as UnitType;
@@ -577,8 +573,8 @@ class GameScene extends Phaser.Scene {
             COLORS[type]
         );
         
-        // Use a simpler ID format that matches server's format
-        const uniqueId = `${type}_${socket.id}`;
+        // Generate a truly unique ID with type prefix and timestamp
+        const uniqueId = `${type}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         
         unit.setStrokeStyle(1, 0x000000);
         unit.setInteractive();
@@ -590,7 +586,6 @@ class GameScene extends Phaser.Scene {
         unit.setAngle(FacingDirection.NORTH); // Set initial angle
         unit.setData('gridX', gridX); // Set initial grid position
         unit.setData('gridY', gridY); // Set initial grid position
-        unit.setVisible(true); // Ensure visibility
         
         const stats = UNIT_STATS[type];
         unit.setData('health', stats.health);
@@ -1311,27 +1306,15 @@ class GameScene extends Phaser.Scene {
         const updatedUnits = new Set<string>();
         
         Object.entries(data.units).forEach(([id, unitData]) => {
-            // First try to find unit by server ID
             let unit = this.units.find(u => u.getData('id') === id);
-            
-            // If not found, try to find by type and owner (for bot units)
-            if (!unit) {
-                unit = this.units.find(u => {
-                    const unitId = u.getData('id');
-                    const unitOwner = u.getData('owner');
-                    return unitId && unitId.startsWith(unitData.type) && unitOwner === unitData.owner;
-                });
-            }
-            
             const isNewUnit = !unit;
             
             if (!unit) {
                 // Create new unit if it doesn't exist
                 console.log(`Creating new unit ${unitData.type} with ID ${id}`);
                 unit = this.createUnit(unitData.type as UnitType, unitData.x, unitData.y);
-                unit.setData('id', id); // Use server's ID
+                unit.setData('id', id);
                 unit.setData('owner', unitData.owner);
-                unit.setVisible(true); // Ensure visibility
                 if (unitData.owner === socket.id) {
                     unit.setData('selectable', true);
                 }
@@ -1360,7 +1343,6 @@ class GameScene extends Phaser.Scene {
                 unit.setData('gridY', unitData.y);
                 unit.setData('facing', unitData.facing);
                 unit.setFillStyle(originalColor);
-                unit.setVisible(true); // Ensure visibility
                 if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                     unitData.y >= 0 && unitData.y < MAP_SIZE) {
                     this.map[unitData.x][unitData.y].setData('occupied', true);
@@ -1378,7 +1360,6 @@ class GameScene extends Phaser.Scene {
                     // Position at start of motion
                     unit.setPosition(startX, startY);
                     unit.setAngle(lastMove.facing);
-                    unit.setVisible(true); // Ensure visibility
                     
                     // Calculate remaining duration
                     const remainingDuration = Math.max(0, totalDuration - elapsed);
@@ -1395,7 +1376,6 @@ class GameScene extends Phaser.Scene {
                             unit.setData('gridX', unitData.x);
                             unit.setData('gridY', unitData.y);
                             unit.setData('facing', unitData.facing);
-                            unit.setVisible(true); // Ensure visibility
                             if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                                 unitData.y >= 0 && unitData.y < MAP_SIZE) {
                                 this.map[unitData.x][unitData.y].setData('occupied', true);
@@ -1409,23 +1389,10 @@ class GameScene extends Phaser.Scene {
                     unit.setData('gridX', unitData.x);
                     unit.setData('gridY', unitData.y);
                     unit.setData('facing', unitData.facing);
-                    unit.setVisible(true); // Ensure visibility
                     if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
                         unitData.y >= 0 && unitData.y < MAP_SIZE) {
                         this.map[unitData.x][unitData.y].setData('occupied', true);
                     }
-                }
-            } else {
-                // No movement - just update position and ensure visibility
-                unit.setPosition(targetX, targetY);
-                unit.setAngle(unitData.facing);
-                unit.setData('gridX', unitData.x);
-                unit.setData('gridY', unitData.y);
-                unit.setData('facing', unitData.facing);
-                unit.setVisible(true); // Ensure visibility
-                if (unitData.x >= 0 && unitData.x < MAP_SIZE && 
-                    unitData.y >= 0 && unitData.y < MAP_SIZE) {
-                    this.map[unitData.x][unitData.y].setData('occupied', true);
                 }
             }
             
@@ -1489,9 +1456,17 @@ if (gameContainer) {
 }
 const game = new Phaser.Game(config);
 
-// Start the appropriate scene based on the URL
+// Get URL parameters
+const urlParams = new URLSearchParams(window.location.search);
+const mode = urlParams.get('mode');
+
+// Start the appropriate scene based on the URL and mode
 if (window.location.pathname === '/play') {
-    game.scene.start('MainMenu');
+    if (mode === 'singleplayer') {
+        game.scene.start('GameScene', { mode: 'singleplayer' });
+    } else {
+        game.scene.start('MainMenu');
+    }
 } else {
     game.scene.start('MainMenu');
 }
