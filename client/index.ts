@@ -424,9 +424,9 @@ class GameScene extends Phaser.Scene {
         // Set up camera for large map
         this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
         this.cameras.main.setViewport(0, 0, GAME_WIDTH, GAME_HEIGHT);
-        // Start camera at center of map
-        this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
-        this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
+        
+        // Find player's spawn point or units to center camera on
+        this.centerCameraOnPlayerUnits();
         
         // Set up input handlers
         this.setupInput();
@@ -933,6 +933,62 @@ class GameScene extends Phaser.Scene {
         }
     }
 
+    // Centers the camera on the player's units or spawn point
+    private centerCameraOnPlayerUnits() {
+        // Find our player in the player list
+        const player = this.pendingGameStart?.players.find((p: { id: string; team: string | null; ready: boolean }) => p.id === socket.id);
+        
+        if (player && player.spawnPoint) {
+            // If we have spawn point information, use that
+            const tileX = player.spawnPoint.x;
+            const tileY = player.spawnPoint.y;
+            
+            // Convert tile coordinates to pixel coordinates and center the camera there
+            const pixelX = tileX * TILE_SIZE;
+            const pixelY = tileY * TILE_SIZE;
+            
+            // Center the camera on this position
+            this.cameras.main.scrollX = Math.max(0, pixelX - GAME_WIDTH / 2);
+            this.cameras.main.scrollY = Math.max(0, pixelY - GAME_HEIGHT / 2);
+            
+            console.log(`Centering camera on spawn point (${tileX}, ${tileY})`);
+            return;
+        }
+        
+        // Fallback: Find any units owned by this player
+        const playerUnits = this.units.filter(unit => unit.getData('owner') === socket.id);
+        
+        if (playerUnits.length > 0) {
+            // Calculate the average position of all player units
+            let avgX = 0;
+            let avgY = 0;
+            
+            playerUnits.forEach(unit => {
+                avgX += unit.getData('gridX') || 0;
+                avgY += unit.getData('gridY') || 0;
+            });
+            
+            avgX = avgX / playerUnits.length;
+            avgY = avgY / playerUnits.length;
+            
+            // Convert to pixel coordinates
+            const pixelX = avgX * TILE_SIZE;
+            const pixelY = avgY * TILE_SIZE;
+            
+            // Center the camera on the average position
+            this.cameras.main.scrollX = Math.max(0, pixelX - GAME_WIDTH / 2);
+            this.cameras.main.scrollY = Math.max(0, pixelY - GAME_HEIGHT / 2);
+            
+            console.log(`Centering camera on player units at (${avgX}, ${avgY})`);
+            return;
+        }
+        
+        // Default: If we can't find units or spawn point, center on the map
+        console.log('No player units or spawn point found, centering on map');
+        this.cameras.main.scrollX = (MAP_WIDTH - GAME_WIDTH) / 2;
+        this.cameras.main.scrollY = (MAP_HEIGHT - GAME_HEIGHT) / 2;
+    }
+
     // Add a method to update the resource display
     private updateResourceDisplay() {
         if (this.resourceDisplay) {
@@ -1407,6 +1463,12 @@ class GameScene extends Phaser.Scene {
         // Update minimap
         if (this.minimapContext && this.minimapCanvas) {
             this.updateMinimap();
+        }
+        
+        // If this is the first time receiving a game state or a tab refocus,
+        // center the camera on player's units
+        if (isRefocus || !this.lastStateUpdate) {
+            this.centerCameraOnPlayerUnits();
         }
     }
 

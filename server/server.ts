@@ -51,6 +51,7 @@ interface Player {
   id: string;
   team: string | null;
   ready: boolean;
+  spawnPoint?: { x: number; y: number }; // Add spawn point information
 }
 
 interface Unit {
@@ -182,12 +183,31 @@ io.on('connection', (socket) => {
       units: initialUnits
     };
 
+    // Define spawn points for up to MAX_PLAYERS_PER_GAME players
+    const spawnPoints = [
+      { x: 10, y: 10, facing: 135 },       // Top left (facing southeast)
+      { x: MAP_SIZE - 10, y: 10, facing: 225 },    // Top right (facing southwest)
+      { x: 10, y: MAP_SIZE - 10, facing: 45 },    // Bottom left (facing northeast)
+      { x: MAP_SIZE - 10, y: MAP_SIZE - 10, facing: 315 },  // Bottom right (facing northwest)
+      { x: MAP_SIZE / 2, y: 10, facing: 180 },    // Top center (facing south)
+      { x: MAP_SIZE / 2, y: MAP_SIZE - 10, facing: 0 }     // Bottom center (facing north)
+    ];
+
     // Create initial units for each player
     gamePlayers.forEach((playerId, i) => {
-      const startX = i * 5 + 2; // Spread players out
-      initialUnits[`TANK_${playerId}`] = { x: startX, y: 2, facing: 0, type: 'TANK', owner: playerId };
-      initialUnits[`INFANTRY_${playerId}`] = { x: startX + 1, y: 2, facing: 0, type: 'INFANTRY', owner: playerId };
-      initialUnits[`HARVESTER_${playerId}`] = { x: startX + 2, y: 2, facing: 0, type: 'HARVESTER', owner: playerId };
+      // Get spawn point (use modulo to handle if we somehow have more than MAX_PLAYERS_PER_GAME)
+      const spawn = spawnPoints[i % spawnPoints.length];
+      
+      // Store spawn point with player data
+      const playerIndex = games[gameId].players.findIndex(p => p.id === playerId);
+      if (playerIndex !== -1) {
+        games[gameId].players[playerIndex].spawnPoint = { x: spawn.x, y: spawn.y };
+      }
+      
+      // Create units in a small formation around the spawn point
+      initialUnits[`TANK_${playerId}`] = { x: spawn.x, y: spawn.y, facing: spawn.facing, type: 'TANK', owner: playerId };
+      initialUnits[`INFANTRY_${playerId}`] = { x: spawn.x + 1, y: spawn.y, facing: spawn.facing, type: 'INFANTRY', owner: playerId };
+      initialUnits[`HARVESTER_${playerId}`] = { x: spawn.x, y: spawn.y + 1, facing: spawn.facing, type: 'HARVESTER', owner: playerId };
       const playerSocket = io.sockets.sockets.get(playerId);
       if (playerSocket) {
         playerSocket.join(gameId);
