@@ -142,47 +142,35 @@ io.on('connection', (socket) => {
   });
 
   // Join matchmaking queue
-  socket.on('joinMatchmaking', (data = {}) => {
-    const mode = data.mode || 'multiplayer';
-    const isSinglePlayer = mode === 'singleplayer';
+  socket.on('joinMatchmaking', () => {
+    matchmakingQueue.push(socket.id);
+    socket.emit('matchmakingStarted');
+    console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
 
-    if (isSinglePlayer) {
-      console.log(`Player ${socket.id} requested single-player game`);
-      createGame([socket.id], true); // Immediate single-player game
-    } else {
-      matchmakingQueue.push(socket.id);
-      socket.emit('matchmakingStarted');
-      console.log(`Player ${socket.id} joined matchmaking queue (${matchmakingQueue.length} players)`);
-
-      // Start game immediately if we reach MAX_PLAYERS_PER_GAME
-      if (matchmakingQueue.length === MAX_PLAYERS_PER_GAME) {
-        if (matchmakingTimer) {
-          clearTimeout(matchmakingTimer);
-          matchmakingTimer = null;
-        }
-        const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
-        createGame(gamePlayers, false); // Multiplayer game with max players
-      } 
-      // Start timer if this is the first player or timer isn't running
-      else if (!matchmakingTimer) {
-        matchmakingTimer = setTimeout(() => {
-          if (matchmakingQueue.length >= 2) {
-            // Start multiplayer game with 2-5 players
-            const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
-            createGame(gamePlayers, false);
-          } else if (matchmakingQueue.length === 1) {
-            // Start single-player game with bot if only one player
-            const gamePlayers = matchmakingQueue.splice(0, 1);
-            createGame(gamePlayers, true);
-          }
-          matchmakingTimer = null;
-        }, MATCHMAKING_TIMEOUT);
+    // Start game immediately if we reach MAX_PLAYERS_PER_GAME
+    if (matchmakingQueue.length === MAX_PLAYERS_PER_GAME) {
+      if (matchmakingTimer) {
+        clearTimeout(matchmakingTimer);
+        matchmakingTimer = null;
       }
+      const gamePlayers = matchmakingQueue.splice(0, MAX_PLAYERS_PER_GAME);
+      createGame(gamePlayers); // Multiplayer game with max players
+    } 
+    // Start timer if this is the first player or timer isn't running
+    else if (!matchmakingTimer) {
+      matchmakingTimer = setTimeout(() => {
+        if (matchmakingQueue.length >= 2) {
+          // Start multiplayer game with 2+ players
+          const gamePlayers = matchmakingQueue.splice(0, matchmakingQueue.length);
+          createGame(gamePlayers);
+        }
+        matchmakingTimer = null;
+      }, MATCHMAKING_TIMEOUT);
     }
   });
 
   // Helper function to create a game with the given players
-  function createGame(gamePlayers: string[], singlePlayer: boolean) {
+  function createGame(gamePlayers: string[]) {
     const gameId = `game_${Date.now()}`;
     const initialUnits: Record<string, any> = {};
 
@@ -190,7 +178,7 @@ io.on('connection', (socket) => {
       id: gameId,
       players: gamePlayers.map(id => ({ id, team: null, ready: false })),
       mapSize: MAP_SIZE,
-      state: singlePlayer ? 'RUNNING' : 'LOBBY',
+      state: 'LOBBY',
       units: initialUnits
     };
 
@@ -214,12 +202,7 @@ io.on('connection', (socket) => {
     console.log(`Emitting gameState to ${gameId}`);
     io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
 
-    if (singlePlayer) {
-      console.log(`Emitting gameStart to ${gameId} for single-player`);
-      io.to(gameId).emit('gameStart', { gameId, players: games[gameId].players, units: games[gameId].units });
-    }
-
-    console.log(`Game ${gameId} created with ${gamePlayers.length} players (${singlePlayer ? 'Single-player' : 'Multiplayer'})`);
+    console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
   }
 
   // Set team
