@@ -2,3 +2,5 @@
 node_modules
 **/node_modules
 all_important_files.md
+client/dist
+server/dist

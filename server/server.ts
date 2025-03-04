@@ -16,7 +16,12 @@ const MATCHMAKING_TIMEOUT = 10000; // 10 seconds timeout for matchmaking
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow all origins in development
+        methods: ["GET", "POST"]
+    }
+});
 
 // Set proper MIME types
 app.use((req, res, next) => {

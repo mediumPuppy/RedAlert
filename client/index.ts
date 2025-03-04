@@ -13,7 +13,7 @@ interface UnitMovedData {
     turnDuration: number;
 }
 
-const socket = io();
+const socket = io('http://localhost:3000');
 
 class MainMenu extends Phaser.Scene {
     private soundOn: boolean = true;
