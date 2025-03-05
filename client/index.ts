@@ -13,6 +13,27 @@ interface UnitMovedData {
     turnDuration: number;
 }
 
+interface GameStateData {
+    gameId: string;
+    players: { id: string; team: string | null; ready: boolean; spawnPoint?: { x: number; y: number; } }[];
+    units: Record<string, { 
+        x: number; 
+        y: number; 
+        facing: number; 
+        type: string; 
+        owner: string;
+        lastMove?: {
+            x: number;
+            y: number;
+            facing: number;
+            timestamp: number;
+            duration: number;
+            turnDuration: number;
+        };
+    }>;
+    mapData?: TileType[][];
+}
+
 const socket = io('http://localhost:3000');
 
 class MainMenu extends Phaser.Scene {
@@ -172,11 +193,7 @@ class GameScene extends Phaser.Scene {
             }
         });
 
-        socket.on('gameStart', (data: { 
-            gameId: string, 
-            players: { id: string, team: string | null, ready: boolean }[], 
-            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
-        }) => {
+        socket.on('gameStart', (data: GameStateData) => {
             console.log('Received gameStart event', data);
             if (this.initialized) {
                 this.inLobby = false;
@@ -202,11 +219,7 @@ class GameScene extends Phaser.Scene {
             }
         });
 
-        socket.on('gameState', (data: { 
-            gameId: string, 
-            players: { id: string, team: string | null, ready: boolean }[], 
-            units: Record<string, { x: number; y: number; facing: number; type: string; owner: string; lastMove?: { x: number; y: number; facing: number; timestamp: number; duration: number; turnDuration: number } }> 
-        }) => {
+        socket.on('gameState', (data: GameStateData) => {
             console.log('Received gameState event', data);
             if (this.initialized) {
                 this.gameId = data.gameId;
@@ -388,16 +401,12 @@ class GameScene extends Phaser.Scene {
         });
     }
 
-    private startGame(data: { 
-        gameId: string, 
-        players: { id: string, team: string | null, ready: boolean }[], 
-        units: Record<string, { x: number; y: number; facing: number; type: string; owner: string }>
-    }) {
+    private startGame(data: GameStateData) {
         // Clear the lobby UI
         this.children.removeAll();
         
-        // Create the game map
-        this.createMap();
+        // Create the game map using server-provided map data
+        this.createMap(data.mapData);
         
         // Use handleGameState to ensure latest state is applied
         this.handleGameState(data);
@@ -1252,13 +1261,15 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    private createMap() {
+    private createMap(mapData?: TileType[][]) {
         // Create grid-based map
         for (let x = 0; x < MAP_SIZE; x++) {
             this.map[x] = [];
             for (let y = 0; y < MAP_SIZE; y++) {
-                const tileType: TileType = Math.random() < 0.1 ? 'WATER' : 
-                               Math.random() < 0.15 ? 'ORE' : 'GRASS';
+                // Use server-provided map data if available, otherwise generate random
+                const tileType: TileType = mapData && mapData[x] && mapData[x][y] 
+                    ? mapData[x][y] 
+                    : (Math.random() < 0.1 ? 'WATER' : Math.random() < 0.25 ? 'ORE' : 'GRASS');
                 
                 const tile = this.add.rectangle(
                     x * TILE_SIZE + TILE_SIZE/2,
@@ -1272,6 +1283,8 @@ class GameScene extends Phaser.Scene {
                 this.map[x][y] = tile;
             }
         }
+        
+        console.log(`Map created ${mapData ? 'from server data' : 'with random generation'}`);
     }
 
     private setupInput() {
@@ -1316,25 +1329,7 @@ class GameScene extends Phaser.Scene {
         });
     }
 
-    private handleGameState(data: { 
-        gameId: string, 
-        players: { id: string, team: string | null, ready: boolean }[], 
-        units: Record<string, { 
-            x: number; 
-            y: number; 
-            facing: number; 
-            type: string; 
-            owner: string;
-            lastMove?: {
-                x: number;
-                y: number;
-                facing: number;
-                timestamp: number;
-                duration: number;
-                turnDuration: number;
-            };
-        }> 
-    }, isRefocus: boolean = false) {
+    private handleGameState(data: GameStateData, isRefocus: boolean = false) {
         this.gameId = data.gameId;
         
         if (this.inLobby) {

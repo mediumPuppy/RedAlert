@@ -13,6 +13,9 @@ const MAP_SIZE = 128;
 const MAX_PLAYERS_PER_GAME = 6;
 const MATCHMAKING_TIMEOUT = 10000; // 10 seconds timeout for matchmaking
 
+// Game types
+type TileType = 'GRASS' | 'WATER' | 'ORE';
+
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
@@ -76,6 +79,7 @@ interface Game {
   mapSize: number;
   state: 'LOBBY' | 'RUNNING' | 'ENDED';
   units: Record<string, Unit>;
+  mapData?: TileType[][];  // Store the map data on the server
 }
 
 interface MoveUnitData {
@@ -86,6 +90,71 @@ interface MoveUnitData {
   duration: number;
   turnDuration: number;
   timestamp?: number; // Add optional timestamp
+}
+
+// Generate a random map with a consistent seed
+function generateMap(mapSize: number, seed?: number): TileType[][] {
+  // Use a seed for consistent random generation
+  const mapSeed = seed || Date.now();
+  console.log(`Generating map with seed: ${mapSeed}`);
+  
+  // Simple seeded random function
+  const seededRandom = (() => {
+    let s = mapSeed;
+    return () => {
+      s = Math.sin(s) * 10000;
+      return s - Math.floor(s);
+    };
+  })();
+  
+  const map: TileType[][] = [];
+  
+  // Create the map grid
+  for (let x = 0; x < mapSize; x++) {
+    map[x] = [];
+    for (let y = 0; y < mapSize; y++) {
+      // Use seeded random to determine tile type
+      const rand = seededRandom();
+      
+      // Determine tile type based on random value
+      // Water: 10%, Ore: 15%, Grass: 75%
+      const tileType: TileType = rand < 0.1 ? 'WATER' : 
+                     rand < 0.25 ? 'ORE' : 'GRASS';
+      
+      map[x][y] = tileType;
+    }
+  }
+  
+  // Ensure spawn points are valid (not water)
+  const spawnPoints = [
+    { x: 10, y: 10 },                      // Top left
+    { x: mapSize - 10, y: 10 },            // Top right
+    { x: 10, y: mapSize - 10 },            // Bottom left
+    { x: mapSize - 10, y: mapSize - 10 },  // Bottom right
+    { x: mapSize / 2, y: 10 },             // Top center
+    { x: mapSize / 2, y: mapSize - 10 }    // Bottom center
+  ];
+  
+  // Ensure spawn areas are playable (change water to grass)
+  spawnPoints.forEach(point => {
+    const buffer = 3; // Make a 3x3 area around spawn points safe
+    for (let dx = -buffer; dx <= buffer; dx++) {
+      for (let dy = -buffer; dy <= buffer; dy++) {
+        const x = point.x + dx;
+        const y = point.y + dy;
+        
+        // Make sure coordinates are valid
+        if (x >= 0 && x < mapSize && y >= 0 && y < mapSize) {
+          // Replace water with grass at spawn points
+          if (map[x][y] === 'WATER') {
+            map[x][y] = 'GRASS';
+          }
+        }
+      }
+    }
+  });
+  
+  return map;
 }
 
 // Game state storage
@@ -109,13 +178,15 @@ io.on('connection', (socket) => {
     socket.emit('gameState', { 
       gameId: existingGameId, 
       players: game.players, 
-      units: game.units 
+      units: game.units,
+      mapData: game.mapData
     });
     if (game.state === 'RUNNING') {
       socket.emit('gameStart', { 
         gameId: existingGameId, 
         players: game.players, 
-        units: game.units 
+        units: game.units,
+        mapData: game.mapData
       });
     } else {
       socket.emit('gameCreated', { 
@@ -134,7 +205,8 @@ io.on('connection', (socket) => {
       socket.emit('gameState', { 
         gameId, 
         players: game.players, 
-        units: game.units 
+        units: game.units,
+        mapData: game.mapData
       });
     } else {
       console.warn(`Game ${gameId} not found for ${socket.id}`);
@@ -175,12 +247,16 @@ io.on('connection', (socket) => {
     const gameId = `game_${Date.now()}`;
     const initialUnits: Record<string, any> = {};
 
+    // Generate a map for this game
+    const mapData = generateMap(MAP_SIZE);
+    
     games[gameId] = {
       id: gameId,
       players: gamePlayers.map(id => ({ id, team: null, ready: false })),
       mapSize: MAP_SIZE,
       state: 'LOBBY',
-      units: initialUnits
+      units: initialUnits,
+      mapData: mapData
     };
 
     // Define spawn points for up to MAX_PLAYERS_PER_GAME players
@@ -220,7 +296,12 @@ io.on('connection', (socket) => {
     console.log(`Emitting gameCreated to ${gameId} with ${gamePlayers.length} players`);
     io.to(gameId).emit('gameCreated', { gameId, players: games[gameId].players });
     console.log(`Emitting gameState to ${gameId}`);
-    io.to(gameId).emit('gameState', { gameId, players: games[gameId].players, units: games[gameId].units });
+    io.to(gameId).emit('gameState', { 
+      gameId, 
+      players: games[gameId].players, 
+      units: games[gameId].units,
+      mapData: games[gameId].mapData
+    });
 
     console.log(`Game ${gameId} created with ${gamePlayers.length} players`);
   }
@@ -249,7 +330,7 @@ io.on('connection', (socket) => {
         // Check if all players are ready
         if (game.players.every(p => p.ready)) {
           game.state = 'RUNNING';
-          io.to(gameId).emit('gameStart', { gameId, players: game.players, units: game.units });
+          io.to(gameId).emit('gameStart', { gameId, players: game.players, units: game.units, mapData: game.mapData });
           console.log(`Game ${gameId} started`);
         }
       }
